@@ -4,6 +4,17 @@
 
 Projet académique visant à construire une démarche complète de Machine Learning autour de deux cas d'usage complémentaires : la **détection automatique de transactions frauduleuses** (classification supervisée) et la **segmentation intelligente de clients** (clustering), avec une couche d'**industrialisation** (API, dashboard, tests).
 
+## Demo en ligne
+
+| Service | URL |
+|---------|-----|
+| **Dashboard Streamlit** | [https://kokou-ml.streamlit.app/](https://kokou-ml.streamlit.app/) |
+| **API (accueil)** | [https://kokou-ml.onrender.com/](https://kokou-ml.onrender.com/) |
+| **API (Swagger /docs)** | [https://kokou-ml.onrender.com/docs](https://kokou-ml.onrender.com/docs) |
+| **Health check** | [https://kokou-ml.onrender.com/health](https://kokou-ml.onrender.com/health) |
+
+> Sur le plan gratuit Render, la première requête après inactivité peut prendre ~30–60 s (cold start).
+
 ---
 
 ## Table des matières
@@ -459,18 +470,29 @@ Pour permettre la vérification par un correcteur **sans VPS** :
 
 ### Checklist avant mise en ligne
 
-- [ ] Modèles présents dans `models/fraud/` et `models/clustering/`
-- [ ] `requirements.txt` à jour
-- [ ] Tests passent (`pytest -q`)
-- [ ] URLs ajoutées ci-dessous
+- [x] Modèles présents dans `models/fraud/` et `models/clustering/`
+- [x] `requirements.txt` à jour
+- [x] Tests passent (`pytest -q`)
+- [x] URLs ajoutées ci-dessous
 
-### Accès en ligne *(à compléter après déploiement)*
+### Accès en ligne
 
 | Service | URL |
 |---------|-----|
-| Dashboard Streamlit | `https://...` |
-| API (Swagger) | `https://.../docs` |
-| Dépôt GitHub | `https://github.com/...` |
+| **Dashboard Streamlit** | [https://kokou-ml.streamlit.app/](https://kokou-ml.streamlit.app/) |
+| **API Render** | [https://kokou-ml.onrender.com/](https://kokou-ml.onrender.com/) |
+| **Documentation API (Swagger)** | [https://kokou-ml.onrender.com/docs](https://kokou-ml.onrender.com/docs) |
+| **Health check** | [https://kokou-ml.onrender.com/health](https://kokou-ml.onrender.com/health) |
+| **Infos modèles** | [https://kokou-ml.onrender.com/model/info](https://kokou-ml.onrender.com/model/info) |
+
+### Vérification rapide pour le correcteur
+
+```bash
+curl https://kokou-ml.onrender.com/health
+curl https://kokou-ml.onrender.com/model/info
+```
+
+Tests interactifs : ouvrir le dashboard Streamlit ou la documentation Swagger.
 
 ---
 
@@ -481,8 +503,8 @@ Pour permettre la vérification par un correcteur **sans VPS** :
 | Notebooks EDA | `notebooks/` | ✅ |
 | Scripts d'entraînement | `src/models/` | ✅ |
 | Modèles sauvegardés | `models/` | ✅ |
-| API FastAPI | `src/api/main.py` | ✅ |
-| Dashboard Streamlit | `dashboard/app.py` | ✅ |
+| Dashboard Streamlit | `dashboard/app.py` | ✅ ([en ligne](https://kokou-ml.streamlit.app/)) |
+| API FastAPI | `src/api/main.py` | ✅ ([en ligne](https://kokou-ml.onrender.com/docs)) |
 | Tests | `tests/` | ✅ |
 | Plan de présentation | `reports/presentation_outline.md` | ✅ |
 | Rapport technique | `reports/rapport_technique.md` | 🔄 |
