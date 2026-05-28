@@ -1,0 +1,44 @@
+{
+  "logistic_regression": {
+    "accuracy": 0.9993197149160452,
+    "precision": 0.6739130434782609,
+    "recall": 0.7251461988304093,
+    "f1": 0.6985915492957746,
+    "roc_auc": 0.9985533838074568,
+    "pr_auc": 0.7674080842142871,
+    "threshold": 0.98,
+    "train_size": 733975,
+    "val_size": 157313,
+    "test_size": 157287,
+    "positive_rate_test": 0.0010871845734231056,
+    "min_recall_constraint": 0.75
+  },
+  "random_forest": {
+    "accuracy": 0.9999809265864312,
+    "precision": 1.0,
+    "recall": 0.9824561403508771,
+    "f1": 0.9911504424778761,
+    "roc_auc": 0.9941273881301096,
+    "pr_auc": 0.986437948705173,
+    "threshold": 0.52,
+    "train_size": 350000,
+    "val_size": 157313,
+    "test_size": 157287,
+    "positive_rate_test": 0.0010871845734231056,
+    "min_recall_constraint": 0.75
+  },
+  "xgboost": {
+    "accuracy": 0.9999809265864312,
+    "precision": 1.0,
+    "recall": 0.9824561403508771,
+    "f1": 0.9911504424778761,
+    "roc_auc": 0.9981088208525931,
+    "pr_auc": 0.991035317737093,
+    "threshold": 0.84,
+    "train_size": 450000,
+    "val_size": 157313,
+    "test_size": 157287,
+    "positive_rate_test": 0.0010871845734231056,
+    "min_recall_constraint": 0.75
+  }
+}

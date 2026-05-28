@@ -1,0 +1,1 @@
+"""Creation de variables metier."""

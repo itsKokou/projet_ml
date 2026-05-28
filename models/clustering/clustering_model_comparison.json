@@ -1,0 +1,74 @@
+{
+  "kmeans_k3": {
+    "silhouette": 0.17213100885229754,
+    "davies_bouldin": 2.1081531249211967,
+    "calinski_harabasz": 489.92194893858357,
+    "n_clusters": 3
+  },
+  "agglomerative_k3": {
+    "silhouette": 0.1620386991626727,
+    "davies_bouldin": 2.3378536840492568,
+    "calinski_harabasz": 412.4569603317009,
+    "n_clusters": 3
+  },
+  "gmm_k3": {
+    "silhouette": 0.18919560209329994,
+    "davies_bouldin": 2.169903702094368,
+    "calinski_harabasz": 434.83593983224154,
+    "n_clusters": 3
+  },
+  "kmeans_k4": {
+    "silhouette": 0.1712941346146547,
+    "davies_bouldin": 2.105564421327256,
+    "calinski_harabasz": 399.07334658276574,
+    "n_clusters": 4
+  },
+  "agglomerative_k4": {
+    "silhouette": 0.1713021261569401,
+    "davies_bouldin": 1.9937227080153814,
+    "calinski_harabasz": 331.35888692788916,
+    "n_clusters": 4
+  },
+  "gmm_k4": {
+    "silhouette": 0.20995156849164776,
+    "davies_bouldin": 2.423037268206795,
+    "calinski_harabasz": 305.40549687371293,
+    "n_clusters": 4
+  },
+  "kmeans_k5": {
+    "silhouette": 0.11217250687644387,
+    "davies_bouldin": 2.237660952715271,
+    "calinski_harabasz": 341.4217236824981,
+    "n_clusters": 5
+  },
+  "agglomerative_k5": {
+    "silhouette": 0.17987046136755522,
+    "davies_bouldin": 1.8925578644773822,
+    "calinski_harabasz": 292.0982401379318,
+    "n_clusters": 5
+  },
+  "gmm_k5": {
+    "silhouette": 0.0971407263616865,
+    "davies_bouldin": 2.3842926901624146,
+    "calinski_harabasz": 263.79073572933004,
+    "n_clusters": 5
+  },
+  "kmeans_k6": {
+    "silhouette": 0.11881690703800074,
+    "davies_bouldin": 2.0661186013896122,
+    "calinski_harabasz": 308.07604496765083,
+    "n_clusters": 6
+  },
+  "agglomerative_k6": {
+    "silhouette": 0.18021750352827537,
+    "davies_bouldin": 1.9584233882285773,
+    "calinski_harabasz": 268.2619581192387,
+    "n_clusters": 6
+  },
+  "gmm_k6": {
+    "silhouette": 0.0861373782426124,
+    "davies_bouldin": 2.3484560831084837,
+    "calinski_harabasz": 227.84872066764888,
+    "n_clusters": 6
+  }
+}

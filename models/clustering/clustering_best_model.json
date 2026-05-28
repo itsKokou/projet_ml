@@ -1,0 +1,10 @@
+{
+  "best_model": "gmm_k4",
+  "selection_score": 0.08879970508130801,
+  "metrics": {
+    "silhouette": 0.20995156849164776,
+    "davies_bouldin": 2.423037268206795,
+    "calinski_harabasz": 305.40549687371293,
+    "n_clusters": 4
+  }
+}

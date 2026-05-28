@@ -1,0 +1,5 @@
+cluster,Income,Age,Recency,Total_Spending,Total_Purchases,NumWebPurchases,NumStorePurchases,NumCatalogPurchases,NumDealsPurchases,Campaign_Acceptance_Total,cluster_size
+0,36571.82,55.41,49.1,123.77,8.79,2.43,3.47,0.64,2.26,0.15,1132
+1,49681.74,62.33,38.9,467.48,20.0,6.98,5.45,1.86,5.71,0.86,42
+2,80575.03,57.01,49.22,1584.17,20.81,5.42,8.28,5.93,1.18,2.58,175
+3,66696.41,59.26,49.58,1032.57,21.17,5.79,8.27,4.63,2.48,0.38,891
