@@ -1,532 +1,437 @@
-# Rapport technique - Projet Machine Learning M2 CDSD
+# Rapport d'analyse et d'interprétation
+## Fraude bancaire et segmentation client
 
-## 1. Resume executif
+---
 
-Ce projet traite deux cas d'usage complementaires :
+## 1. Synthèse analytique
 
-- la detection de transactions frauduleuses a partir d'un jeu de donnees transactionnel ;
-- la segmentation de clients a partir de donnees marketing et comportementales.
+Ce rapport ne décrit pas seulement la démarche technique : il interprète **ce que disent les données**, **ce que signifient les modèles** et **ce qu'une organisation peut en faire**.
 
-La partie fraude est un probleme de classification supervisee fortement desequilibre. Le meilleur modele obtenu est un modele XGBoost, selectionne sur la PR-AUC, avec une PR-AUC de 0.9910 sur le jeu de test.
+### Constats majeurs
 
-La partie segmentation est un probleme non supervise. Le meilleur modele exploitable pour le dashboard et l'inference est un Gaussian Mixture Model avec 4 clusters. Les segments obtenus sont interpretables et peuvent etre relies a des actions marketing : clients faibles depenses, clients promotionnels/digitaux, clients premium tres reactifs et clients a forte valeur.
+**Sur la fraude**, le jeu de données révèle un phénomène rare (environ **0,11 %** des transactions) mais structuré. Les fraudes ne se répartissent pas au hasard : elles se concentrent sur les types `TRANSFER` et `CASH_OUT`, et s'accompagnent souvent d'**incohérences entre montants et variations de soldes**. Le modèle XGBoost retenu (PR-AUC = **0,991**) classe très bien les transactions suspectes, mais cette performance doit être lue comme un **signal fort du dataset** autant qu'une garantie de performance en production.
 
-Le projet est structure pour pouvoir evoluer vers une approche MLOps : scripts reutilisables, modeles sauvegardes, tests automatises, API FastAPI et dashboard Streamlit.
+**Sur la segmentation**, les clients ne forment pas des groupes parfaitement séparés (silhouette = **0,21**), ce qui est normal en marketing : les comportements évoluent progressivement. Malgré cela, **quatre profils distincts** émergent clairement et permettent des décisions actionnables : un bloc massif peu actif, un noyau premium très réactif, un segment à forte valeur plus stable, et une minorité promotionnelle/digital.
 
-## 2. Objectifs du projet
+### Message central pour le décideur
 
-### 2.1 Detection de fraude
+| Domaine | Question métier | Réponse de l'analyse |
+|---------|-----------------|----------------------|
+| Fraude | Faut-il bloquer ou surveiller ? | Prioriser le **rappel** ; calibrer le seuil selon la capacité humaine de traitement des alertes |
+| Fraude | Où concentrer les contrôles ? | Sur `TRANSFER` / `CASH_OUT` et les transactions avec écarts de soldes anormaux |
+| Marketing | Qui cibler en priorité ? | Cluster 2 (premium réactif) et Cluster 3 (forte valeur) pour la valeur ; Cluster 0 pour la réactivation |
+| Marketing | Les segments sont-ils fiables ? | Oui pour orienter des campagnes, non comme vérité absolue — validation métier indispensable |
 
-L'objectif est de predire si une transaction est frauduleuse ou non via la variable cible `isFraud`.
+---
 
-Les enjeux principaux sont :
+## 2. Problématique et questions d'analyse
 
-- detecter le maximum de fraudes ;
-- limiter les fausses alertes ;
-- choisir un seuil de decision adapte a la capacite de traitement metier ;
-- expliquer les predictions afin de rendre le modele utilisable par des analystes fraude.
+### 2.1 Fraude — ce que l'on cherche à comprendre
 
-### 2.2 Segmentation client
+- Quelles transactions présentent un profil atypique ?
+- Le risque est-il lié au montant, au type, ou à la cohérence comptable ?
+- Quel compromis accepter entre **fraudes manquées** (coût financier) et **fausses alertes** (coût opérationnel) ?
 
-L'objectif est d'identifier des groupes de clients ayant des comportements similaires.
+### 2.2 Segmentation — ce que l'on cherche à comprendre
 
-Les enjeux principaux sont :
+- Existe-t-il des groupes de clients homogènes en termes de valeur, de canal et de sensibilité aux campagnes ?
+- Peut-on relier chaque groupe à une stratégie marketing différente ?
+- Les segments sont-ils suffisamment grands et stables pour être exploités ?
 
-- obtenir des segments lisibles ;
-- comprendre la valeur et le comportement de chaque segment ;
-- proposer des actions marketing adaptees ;
-- construire une base reutilisable dans un dashboard ou une campagne.
+### 2.3 Méthodologie expérimentale
 
-## 3. Donnees utilisees
+#### Détection de fraude
 
-### 3.1 Donnees fraude
+La démarche de modélisation suit une logique supervisée :
 
-Fichier utilise :
+1. nettoyage initial des colonnes et suppression des doublons ;
+2. construction de variables métier autour des soldes (`origin_error`, `dest_error`, ratio montant/solde, indicateurs de soldes nuls) ;
+3. exclusion des identifiants directs (`nameOrig`, `nameDest`) et de `isFlaggedFraud` afin d'éviter une dépendance excessive à un signal déjà issu d'un système de détection ;
+4. encodage de `type`, imputation et standardisation via pipeline ;
+5. séparation stratifiée train/validation/test ;
+6. calibration du seuil sur validation avec contrainte de rappel minimal ;
+7. sélection finale sur la **PR-AUC**, plus adaptée que l'accuracy pour une classe rare.
 
-- `data/raw/detection_fraude.csv`
+Modèles comparés :
 
-Variables importantes :
-
-- `step` : unite temporelle de la transaction ;
-- `type` : type de transaction ;
-- `amount` : montant transfere ;
-- `oldbalanceOrg`, `newbalanceOrig` : soldes de l'emetteur ;
-- `oldbalanceDest`, `newbalanceDest` : soldes du destinataire ;
-- `isFraud` : variable cible ;
-- `isFlaggedFraud` : indicateur de signalement automatique.
-
-Volumetrie :
-
-- environ 1 048 575 transactions ;
-- taux de fraude proche de 0.109 % ;
-- probleme fortement desequilibre.
-
-Point metier important :
-
-- les fraudes observees sont concentrees sur les transactions `TRANSFER` et `CASH_OUT`.
-
-### 3.2 Donnees segmentation
-
-Fichier utilise :
-
-- `data/raw/data_cluster.csv`
-
-Variables importantes :
-
-- variables demographiques : age, education, situation matrimoniale, revenu ;
-- variables de consommation : depenses par categorie ;
-- variables de canal : achats web, catalogue, magasin, promotions ;
-- variables marketing : acceptation des campagnes et reponse.
-
-Volumetrie :
-
-- 2 240 clients ;
-- quelques valeurs manquantes sur `Income`.
-
-## 4. Methodologie generale
-
-La demarche suivie est la suivante :
-
-1. Chargement des donnees.
-2. Nettoyage de base.
-3. Feature engineering.
-4. Construction de pipelines.
-5. Entrainement de plusieurs modeles.
-6. Evaluation comparative.
-7. Sauvegarde du meilleur modele.
-8. Interpretation metier.
-9. Mise a disposition via dashboard et API.
-
-Le code est organise dans les dossiers suivants :
-
-- `src/data/` : chargement et preprocessing ;
-- `src/features/` : creation des variables ;
-- `src/models/` : entrainement et evaluation ;
-- `src/api/` : API de prediction ;
-- `dashboard/` : application Streamlit ;
-- `models/` : modeles et resultats sauvegardes ;
-- `reports/` : rapports, plans et figures.
-
-## 5. Preprocessing et feature engineering
-
-### 5.1 Fraude
-
-Les principales transformations sont :
-
-- nettoyage des doublons ;
-- remplacement de `oldbalanceOrg = 0` par une valeur manquante pour eviter les divisions par zero ;
-- suppression des identifiants directs `nameOrig` et `nameDest` dans la baseline ;
-- suppression de `isFlaggedFraud` pour eviter une dependance excessive a un signal deja issu d'un systeme de detection ;
-- encodage de la variable `type` ;
-- standardisation des variables numeriques ;
-- imputation des valeurs manquantes.
-
-Variables creees :
-
-- `origin_balance_diff` : difference entre ancien et nouveau solde emetteur ;
-- `origin_error` : incoherence entre mouvement du solde emetteur et montant ;
-- `dest_balance_diff` : difference entre nouveau et ancien solde destinataire ;
-- `dest_error` : incoherence entre mouvement du solde destinataire et montant ;
-- `is_transfer_or_cashout` : indicateur des types de transactions a risque ;
-- `is_zero_newbalance_origin` : indicateur de solde emetteur vide apres transaction ;
-- `is_zero_oldbalance_dest` : indicateur de destinataire avec solde initial nul ;
-- `amount_to_oldbalance_ratio` : ratio entre montant et solde initial ;
-- `step_bucket` : regroupement temporel simple.
-
-Ces variables permettent de capturer les incoherences comptables et les comportements typiques des fraudes.
-
-### 5.2 Segmentation
-
-Les principales transformations sont :
-
-- imputation de `Income` par la mediane ;
-- suppression de colonnes constantes comme `Z_CostContact` et `Z_Revenue` ;
-- encodage des variables categorielles ;
-- standardisation des variables numeriques ;
-- suppression des variables non pertinentes pour l'apprentissage des segments : `ID`, `Response`, `Complain`, `Dt_Customer`.
-
-Variables creees :
-
-- `Age` ;
-- `Customer_Tenure_days` ;
-- `Total_Spending` ;
-- `Total_Purchases` ;
-- ratios par canal d'achat ;
-- `Children` ;
-- `Campaign_Acceptance_Total`.
-
-Ces variables transforment les donnees brutes en indicateurs metier plus lisibles.
-
-## 6. Modelisation fraude
-
-### 6.1 Separation des donnees
-
-Les donnees ont ete separees en trois parties :
-
-- entrainement ;
-- validation ;
-- test.
-
-La separation est stratifiee afin de conserver la proportion de fraudes dans chaque sous-ensemble.
-
-Le jeu de test contient 157 287 transactions avec un taux de fraude de 0.1087 %, soit environ 171 fraudes.
-
-### 6.2 Modeles testes
-
-Trois modeles ont ete compares :
-
-- regression logistique ;
+- régression logistique ;
 - random forest ;
 - XGBoost.
 
-Pour tenir compte du desequilibre de classe :
+#### Segmentation client
 
-- la regression logistique utilise `class_weight="balanced"` ;
-- la random forest utilise `class_weight="balanced_subsample"` ;
-- XGBoost utilise `scale_pos_weight`.
+La démarche non supervisée suit une logique de segmentation interprétable :
 
-Un seuil de decision est selectionne sur le jeu de validation avec une contrainte de rappel minimal.
+1. imputation de `Income` par la médiane ;
+2. suppression des colonnes constantes (`Z_CostContact`, `Z_Revenue`) ;
+3. création de variables métier (`Age`, `Total_Spending`, `Total_Purchases`, ratios par canal, `Campaign_Acceptance_Total`) ;
+4. encodage des catégories et standardisation ;
+5. comparaison de K-Means, clustering hiérarchique et Gaussian Mixture Model ;
+6. test de plusieurs nombres de clusters (`k = 3, 4, 5, 6`) ;
+7. choix final fondé sur un compromis entre métriques statistiques et lisibilité métier.
 
-### 6.3 Resultats
+---
 
-| Modele | Accuracy | Precision | Recall | F1-score | ROC-AUC | PR-AUC | Seuil |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| Regression logistique | 0.9993 | 0.6739 | 0.7251 | 0.6986 | 0.9986 | 0.7674 | 0.98 |
-| Random Forest | 0.99998 | 1.0000 | 0.9825 | 0.9912 | 0.9941 | 0.9864 | 0.52 |
-| XGBoost | 0.99998 | 1.0000 | 0.9825 | 0.9912 | 0.9981 | 0.9910 | 0.84 |
+## 3. Analyse et interprétation — données de fraude
 
-Le modele retenu est XGBoost car il obtient la meilleure PR-AUC.
+### 3.1 Un déséquilibre extrême qui change la lecture des métriques
 
-### 6.4 Interpretation des resultats fraude
+Avec environ **1 fraude pour 920 transactions normales**, une accuracy de 99,9 % peut être obtenue en ignorant quasiment toutes les fraudes. **L'accuracy n'est donc pas une métrique décisionnelle** dans ce contexte.
 
-L'accuracy est tres elevee pour tous les modeles, mais cette metrique est peu informative dans un contexte tres desequilibre. Un modele qui predit toujours "non fraude" aurait deja une accuracy tres elevee.
+Les métriques pertinentes sont :
 
-Les metriques importantes sont donc :
+- **Recall (rappel)** : part des fraudes réelles détectées — lié directement au montant de pertes évitées ;
+- **Precision** : part des alertes qui sont de vraies fraudes — lié à la charge de travail des équipes ;
+- **PR-AUC** : qualité globale du classement sur la classe rare.
 
-- recall : capacite a retrouver les fraudes ;
-- precision : proportion des alertes qui sont vraiment frauduleuses ;
-- F1-score : compromis entre precision et recall ;
-- PR-AUC : qualite du classement dans un contexte de classe rare.
+**Interprétation** : toute évaluation du modèle doit être présentée au métier en termes de fraudes captées, fraudes manquées et volume d'alertes — pas en pourcentage d'accuracy.
 
-Avec XGBoost :
+### 3.2 Concentration du risque par type de transaction
 
-- le recall est de 0.9825 ;
-- la precision est de 1.0000 ;
-- sur environ 171 fraudes dans le test, le modele en detecte environ 168 et en manque environ 3 ;
-- aucun faux positif n'est observe au seuil retenu dans ce test.
+L'EDA montre que les fraudes sont quasi absentes sur `PAYMENT`, `CASH_IN` et `DEBIT`, et concentrées sur :
 
-Ces resultats sont excellents, mais doivent etre interpretes avec prudence :
+- **TRANSFER** : taux de fraude le plus élevé (~0,65 %) ;
+- **CASH_OUT** : taux plus faible mais non négligeable (~0,15 %).
 
-- le jeu de donnees est probablement tres structure ;
-- les variables de solde peuvent contenir des signaux tres forts ;
-- il faut verifier la stabilite sur de nouvelles donnees ;
-- il faut surveiller la derive des comportements frauduleux.
+![Taux de fraude par type de transaction](figures/01_fraud_rate_by_type.png)
 
-## 7. Segmentation client
+**Interprétation métier** : le risque n'est pas uniforme sur le portefeuille transactionnel. Une politique de contrôle différenciée par type de transaction est justifiée : seuils plus bas ou revue systématique sur `TRANSFER` et `CASH_OUT`, traitement allégé ailleurs.
 
-### 7.1 Modeles testes
+### 3.3 Les soldes comme signal d'anomalie comptable
 
-Les modeles suivants ont ete compares pour plusieurs nombres de clusters :
+Une part importante des transactions présente des écarts entre :
 
-- K-Means ;
-- Agglomerative Clustering ;
-- Gaussian Mixture Model.
+- `oldbalanceOrg - amount` et `newbalanceOrig` ;
+- `oldbalanceDest + amount` et `newbalanceDest`.
 
-Les valeurs de `k` testees sont 3, 4, 5 et 6.
+Les transactions frauduleuses présentent en moyenne des **écarts de solde plus marqués** que les transactions normales.
 
-### 7.2 Metriques utilisees
+**Interprétation** : la fraude dans ce dataset semble souvent associée à des mouvements de fonds qui ne respectent pas la logique comptable attendue (vidage de compte, transfert vers compte vide, etc.). Les variables `origin_error`, `dest_error` et les ratios montant/solde ne sont pas de simples features techniques : elles traduisent une **hypothèse métier** — une transaction cohérente doit respecter la conservation des soldes.
 
-Les metriques principales sont :
+### 3.4 Distribution des montants
 
-- Silhouette Score : mesure la separation et la cohesion des clusters ;
-- Davies-Bouldin Score : plus il est faible, meilleure est la separation ;
-- Calinski-Harabasz Score : mesure le rapport entre dispersion inter-clusters et intra-clusters.
+Les montants sont très asymétriques (queue lourde). Les fraudes peuvent concerner des montants modestes comme très élevés.
 
-### 7.3 Resultats clustering
+**Interprétation** : un filtre basé uniquement sur le montant élevé serait insuffisant. Le modèle doit combiner montant, type et cohérence des soldes.
 
-Le modele retenu est `gmm_k4`.
+---
 
-Metriques :
+## 4. Analyse et interprétation — données clients
 
-- silhouette : 0.2100 ;
-- Davies-Bouldin : 2.4230 ;
-- Calinski-Harabasz : 305.4055 ;
-- nombre de clusters : 4.
+### 4.1 Structure de la base client
 
-Le score silhouette reste modere. Cela signifie que les groupes ne sont pas parfaitement separes. C'est frequent en segmentation client, car les comportements marketing sont souvent progressifs plutot que strictement separes.
+- **2 240 clients**, profils hétérogènes en revenu et dépenses ;
+- **24 revenus manquants** sur `Income` — impact limité mais nécessite imputation prudente ;
+- colonnes `Z_CostContact` et `Z_Revenue` constantes → sans variance, donc sans pouvoir discriminant.
 
-Le choix de 4 clusters est pertinent car il produit des segments lisibles et exploitables.
+**Note sur les montants** : les valeurs monétaires sont interprétées comme des unités du dataset. Le symbole `€` utilisé dans les tableaux de profils sert uniquement de repère de lecture et ne garantit pas la devise réelle des données.
 
-## 8. Profils clients obtenus
+### 4.2 Relation revenu / dépenses
 
-### Cluster 0 - Clients faible valeur / faible engagement
+La relation entre `Income` et `Total_Spending` n'est pas linéaire : certains clients dépensent proportionnellement plus que leur revenu suggère, d'autres restent en dessous de leur capacité théorique.
 
-Taille :
+**Interprétation** : le revenu seul ne définit pas la valeur client. Le comportement d'achat (fréquence, catégories, canaux) apporte une information complémentaire essentielle pour la segmentation.
 
-- 1 132 clients.
+### 4.3 Canaux d'achat et sensibilité marketing
 
-Profil moyen :
+Les clients se répartissent différemment entre :
 
-- revenu moyen : 36 571.82 ;
-- age moyen : 55.41 ans ;
-- depense totale moyenne : 123.77 ;
-- nombre total d'achats : 8.79 ;
-- acceptation campagne : 0.15.
+- achats **magasin** (canal dominant en moyenne) ;
+- achats **web** ;
+- achats **catalogue** ;
+- achats **promotionnels**.
 
-Interpretation :
+La variable `Campaign_Acceptance_Total` varie fortement d'un client à l'autre.
 
-- clients nombreux mais peu depensiers ;
-- faible engagement marketing ;
-- achats limites sur tous les canaux.
+**Interprétation** : il existe bien une dimension « canal préféré » et une dimension « sensibilité aux campagnes », exploitables pour personnaliser les actions commerciales.
 
-Actions recommandees :
+---
 
-- campagnes de reactivation simples ;
-- offres d'entree de gamme ;
-- coupons limites dans le temps ;
-- communication orientee prix et praticite.
+## 5. Interprétation des résultats — détection de fraude
 
-### Cluster 1 - Clients promotionnels et digitaux
+### 5.1 Comparaison des modèles (lecture métier)
 
-Taille :
+| Modèle | PR-AUC | Recall | Precision | Seuil | Lecture |
+|--------|-------:|-------:|----------:|------:|---------|
+| Régression logistique | 0,767 | 0,725 | 0,674 | 0,98 | Baseline interprétable mais insuffisante pour un usage opérationnel strict |
+| Random Forest | 0,986 | 0,983 | 1,000 | 0,52 | Très performant ; seuil bas = modèle confiant rapidement |
+| **XGBoost** | **0,991** | **0,983** | **1,000** | **0,84** | **Meilleur classement global ; retenu** |
 
-- 42 clients.
+![Comparaison des modèles de détection de fraude](figures/02_fraud_model_comparison.png)
 
-Profil moyen :
+**Pourquoi XGBoost plutôt que Random Forest ?**  
+Les deux atteignent recall et precision identiques sur le test, mais XGBoost présente la **meilleure PR-AUC** (0,991 vs 0,986), signe d'un meilleur classement des cas les plus ambigus — utile pour prioriser les alertes.
 
-- revenu moyen : 49 681.74 ;
-- age moyen : 62.33 ans ;
-- depense totale moyenne : 467.48 ;
-- nombre total d'achats : 20.00 ;
-- achats web : 6.98 ;
-- achats promotionnels : 5.71 ;
-- acceptation campagne : 0.86.
+**Pourquoi pas la régression logistique ?**  
+Elle reste utile comme modèle explicable (coefficients), mais avec un recall de 0,725 elle laisserait échapper environ **27 % des fraudes** au seuil retenu — inacceptable si la priorité est de minimiser les pertes.
 
-Interpretation :
+### 5.2 Lecture de la matrice de confusion (estimation test)
 
-- petit segment mais assez actif ;
-- forte sensibilite aux promotions ;
-- utilisation importante du canal web ;
-- bonne reactivite aux campagnes.
+Sur le jeu de test (~157 000 transactions, ~171 fraudes) :
 
-Actions recommandees :
+- **Fraudes détectées** : ~168 (recall 98,3 %) ;
+- **Fraudes manquées** : ~3 ;
+- **Faux positifs** : 0 au seuil retenu (precision 100 %).
 
-- offres promotionnelles personnalisees ;
-- campagnes email ou web ciblees ;
-- bundles et reductions conditionnelles ;
-- tests A/B sur mecanismes de couponing.
+![Matrice de confusion estimée pour XGBoost](figures/03_fraud_confusion_matrix_estimated.png)
 
-### Cluster 2 - Clients premium tres reactifs
+**Interprétation prudente** :  
+Un score parfait en precision sur un seul jeu de test est **atypique en conditions réelles**. Cela peut indiquer :
 
-Taille :
+1. un dataset très séparable (signaux de soldes très forts) ;
+2. un seuil élevé (0,84) qui ne déclenche que les cas les plus évidents ;
+3. un risque de **sur-apprentissage** ou de fuite indirecte si les variables de solde reflètent mécaniquement le label.
 
-- 175 clients.
+**Recommandation** : valider sur une période temporelle future (`step` non vue) avant tout déploiement automatique de blocage.
 
-Profil moyen :
+### 5.3 Le seuil de décision comme choix métier
 
-- revenu moyen : 80 575.03 ;
-- age moyen : 57.01 ans ;
-- depense totale moyenne : 1 584.17 ;
-- nombre total d'achats : 20.81 ;
-- achats catalogue : 5.93 ;
-- achats magasin : 8.28 ;
-- acceptation campagne : 2.58.
+Le seuil 0,84 signifie : « alerter seulement lorsque le modèle est très confiant ».
 
-Interpretation :
+| Si on baisse le seuil | Effet |
+|-----------------------|-------|
+| Recall ↑ | Plus de fraudes captées |
+| Precision ↓ probable | Plus de fausses alertes, surcharge des analystes |
 
-- segment a tres forte valeur ;
-- revenu eleve ;
-- depenses tres importantes ;
-- tres forte reactivite aux campagnes ;
-- canal magasin et catalogue importants.
+**Interprétation** : le seuil n'est pas un paramètre technique secondaire — c'est le **traducteur entre performance statistique et politique de risque**. Il doit être recalibré avec les équipes en fonction du nombre d'alertes traitables par jour.
 
-Actions recommandees :
+### 5.4 Variables explicatives du modèle
 
-- offres premium ;
-- programme VIP ;
-- avant-premieres ;
-- recommandations personnalisees ;
-- relation client renforcee.
+L'importance des variables confirme que le modèle s'appuie fortement sur des signaux cohérents avec l'analyse métier : type de transaction, montants, soldes et variables dérivées d'incohérence.
 
-### Cluster 3 - Clients forte valeur stables
+![Importance des variables du modèle fraude](figures/04_fraud_feature_importance.png)
 
-Taille :
+**Interprétation** : cette lecture ne remplace pas une analyse SHAP, mais elle donne déjà un contrôle de cohérence. Si les variables les plus importantes étaient des identifiants techniques ou des colonnes impossibles à connaître en production, cela signalerait un risque de fuite de données. Ici, les signaux dominants restent compatibles avec une logique opérationnelle.
 
-- 891 clients.
+### 5.5 Typologie des cas difficiles (hypothèses)
 
-Profil moyen :
+Même avec un excellent modèle, certains cas restent difficiles :
 
-- revenu moyen : 66 696.41 ;
-- age moyen : 59.26 ans ;
-- depense totale moyenne : 1 032.57 ;
-- nombre total d'achats : 21.17 ;
-- achats magasin : 8.27 ;
-- achats catalogue : 4.63 ;
-- acceptation campagne : 0.38.
+- fraudes mimant des transactions légitimes (soldes cohérents) ;
+- montants faibles noyés dans le bruit ;
+- nouveaux schémas de fraude non représentés dans l'historique.
 
-Interpretation :
+**Interprétation** : le modèle doit être vu comme un **filtre intelligent**, pas comme un substitut complet à l'expertise humaine.
 
-- segment important en taille et valeur ;
-- clients fideles avec fortes depenses ;
-- engagement commercial fort mais reponse campagne plus faible que le cluster 2 ;
-- canal magasin tres present.
+---
 
-Actions recommandees :
+## 6. Interprétation des résultats — segmentation client
 
-- fidelisation ;
-- cross-sell ;
-- offres personnalisees mais moins promotionnelles ;
-- parcours omnicanal magasin/catalogue/web.
+### 6.1 Qualité mathématique vs utilité métier
 
-## 9. Recommandations metier
+Le modèle retenu (`GMM`, k = 4) affiche :
 
-### 9.1 Fraude
+- **Silhouette : 0,21** → séparation modérée ;
+- **Davies-Bouldin : 2,42** → clusters pas parfaitement compacts ;
+- **Calinski-Harabasz : 305** → structure globale présente.
 
-Recommandations :
+![Projection PCA des clients par cluster](figures/05_cluster_pca_projection.png)
 
-- utiliser XGBoost comme modele principal ;
-- conserver le seuil de decision optimise, mais le recalibrer selon la capacite des analystes fraude ;
-- suivre le recall pour limiter les fraudes manquees ;
-- suivre la precision pour eviter une surcharge d'alertes ;
-- analyser manuellement les faux negatifs ;
-- mettre en place un suivi par type de transaction.
+**Interprétation** : un score silhouette faible ne signifie pas que la segmentation est inutile. En marketing, les clients occupent souvent un **continuum** (du client occasionnel au client premium). L'objectif n'est pas la perfection mathématique mais la **lisibilité des personas** et leur **actionnabilité**.
 
-Politique possible :
+Le choix de 4 clusters est justifié car il produit des profils contrastés sans fragmenter excessivement la base.
 
-- score tres eleve : blocage ou verification forte ;
-- score intermediaire : revue humaine ;
-- score faible : transaction normale.
+### 6.2 Personas interprétés
 
-### 9.2 Marketing
+#### Cluster 0 — « Dormants à faible valeur » (50,5 % de la base)
 
-Recommandations :
+| Indicateur | Valeur moyenne | Lecture |
+|------------|---------------:|---------|
+| Revenu | 36 572 € | Moyen, mais sous-exploité |
+| Dépense totale | 124 € | Très faible |
+| Acceptation campagnes | 0,15 | Quasi insensible |
 
-- Cluster 0 : reactivation et offres accessibles.
-- Cluster 1 : promotions digitales et coupons.
-- Cluster 2 : premium, VIP, personnalisation forte.
-- Cluster 3 : fidelisation et developpement de valeur.
+**Interprétation** : ce n'est pas nécessairement un segment « pauvre » — c'est surtout un segment **désengagé**. Le faible revenu n'explique pas à lui seul la faible dépense (comparer au cluster 1, revenu similaire mais dépenses 4× supérieures).
 
-Le clustering doit etre utilise comme un outil d'aide a la decision. Les segments doivent etre valides par les equipes marketing avant lancement de campagnes.
+**Enjeu** : réactivation à faible coût. Campagnes massives peu coûteuses plutôt que personnalisation lourde.
 
-## 10. Industrialisation et MLOps
+---
 
-### 10.1 Architecture actuelle
+#### Cluster 1 — « Chasseurs de promotions digitaux » (1,9 % de la base)
 
-Le projet contient deja :
+| Indicateur | Valeur moyenne | Lecture |
+|------------|---------------:|---------|
+| Revenu | 49 682 € | Intermédiaire |
+| Dépense totale | 467 € | Modérée mais active |
+| Achats web | 6,98 | Canal dominant |
+| Achats promo | 5,71 | Très élevé |
+| Acceptation campagnes | 0,86 | Très réactive |
 
-- scripts d'entrainement ;
-- modeles sauvegardes avec `joblib` ;
-- resultats en JSON et CSV ;
-- dashboard Streamlit ;
-- API FastAPI ;
-- tests automatiques avec pytest.
+**Interprétation** : segment **petit mais hyper-réactif** aux offres. Comportement typique du client qui achète quand il y a une réduction, surtout en ligne. Âge moyen élevé (62 ans) : ne pas associer automatiquement « digital » à « jeune ».
 
-### 10.2 Architecture cible
+**Enjeu** : ROI élevé sur campagnes ciblées (coupons, flash sales web). Attention au risque de **cannibalisation des marges**.
 
-Architecture recommandee :
+---
 
-1. Ingestion des donnees.
-2. Validation du schema.
-3. Preprocessing.
-4. Feature engineering.
-5. Entrainement.
-6. Evaluation.
-7. Sauvegarde et versioning du modele.
-8. Deploiement API/dashboard.
-9. Monitoring.
-10. Re-entrainement.
+#### Cluster 2 — « Premium ultra-engagés » (7,8 % de la base)
 
-### 10.3 Monitoring
+| Indicateur | Valeur moyenne | Lecture |
+|------------|---------------:|---------|
+| Revenu | 80 575 € | Élevé |
+| Dépense totale | 1 584 € | Très élevée (×12 vs cluster 0) |
+| Achats magasin | 8,28 | Canal privilégié |
+| Acceptation campagnes | 2,58 | La plus élevée |
 
-Pour la fraude :
+**Interprétation** : cœur de la **valeur économique**. Clients à fort pouvoir d'achat, dépenses élevées, omnicanal (magasin + catalogue), et forte réponse aux campagnes. Ce segment combine **valeur** et **réactivité** — profil rare et précieux.
 
-- taux d'alertes ;
-- distribution des scores ;
-- precision et recall quand les labels reels sont disponibles ;
-- derive des montants ;
-- derive des types de transaction ;
-- temps de reponse API.
+**Enjeu** : programme VIP, relation personnalisée, avant-premières. Éviter les promotions agressives qui pourraient dégrader l'image premium.
 
-Pour la segmentation :
+---
 
-- taille des clusters ;
-- evolution des revenus moyens par segment ;
-- evolution des depenses moyennes ;
-- stabilite des clusters ;
-- apparition de nouveaux profils clients.
+#### Cluster 3 — « Fidèles à forte valeur » (39,8 % de la base)
 
-### 10.4 Versioning
+| Indicateur | Valeur moyenne | Lecture |
+|------------|---------------:|---------|
+| Revenu | 66 696 € | Élevé |
+| Dépense totale | 1 033 € | Élevée |
+| Achats magasin | 8,27 | Canal dominant |
+| Acceptation campagnes | 0,38 | Faible |
 
-Elements a versionner :
+**Interprétation** : segment **massif et rentable**, mais moins sensible aux campagnes que le cluster 2. Comportement de client fidèle qui achète régulièrement en magasin sans attendre de promotion. La dépense est élevée par **habitude**, pas par réactivité promotionnelle.
 
-- code source avec Git ;
-- dependances avec `requirements.txt` ;
-- modeles avec MLflow ou un registre de modeles ;
-- metriques avec fichiers JSON/CSV ;
-- donnees avec DVC ou Git LFS si elles sont trop volumineuses.
+**Enjeu** : fidélisation, cross-sell, parcours omnicanal. Ne pas les bombarder de promotions (faible ROI, risque de lassitude).
 
-## 11. Limites du projet
+---
 
-### 11.1 Limites fraude
+### 6.3 Carte stratégique des segments
 
-- Le taux de fraude est extremement faible.
-- Les resultats sont tres eleves et doivent etre confirmes sur donnees futures.
-- Les fraudeurs changent de comportement, ce qui peut provoquer de la derive.
-- Les variables de solde peuvent etre tres predictives dans ce jeu de donnees, mais leur qualite doit etre garantie en production.
-- Le cout metier d'un faux positif et d'un faux negatif n'est pas encore chiffre.
+![Profil normalisé des clusters clients](figures/06_cluster_profile_heatmap.png)
 
-### 11.2 Limites segmentation
+```
+                    DÉPENSE ÉLEVÉE
+                         │
+         Cluster 2       │       Cluster 3
+      (premium réactif)  │    (fidèles stables)
+                         │
+  ───────────────────────┼─────────────────────── RÉACTIVITÉ CAMPAGNES
+                         │
+         Cluster 0       │       Cluster 1
+        (dormants)       │   (promo digitaux)
+                         │
+                    DÉPENSE FAIBLE
+```
 
-- Le score silhouette est modere.
-- Les clusters doivent etre valides par le metier.
-- Les donnees ne contiennent pas d'historique long de campagnes.
-- Les segments peuvent evoluer avec le temps.
-- Certains clusters sont petits, notamment le cluster 1.
+**Interprétation** : la segmentation révèle deux axes indépendants — **valeur/dépense** et **sensibilité aux campagnes** — qui ne se confondent pas. Un client riche (cluster 3) n'est pas forcément réactif aux promotions (contrairement au cluster 2).
 
-## 12. Pistes d'amelioration
+---
 
-### 12.1 Ameliorations fraude
+## 7. Recommandations stratégiques
 
-- Ajouter une courbe precision-rappel dans le rapport final.
-- Tester LightGBM et CatBoost.
-- Optimiser les hyperparametres avec Optuna.
-- Ajouter SHAP pour expliquer les predictions.
-- Construire des features reseau entre emetteurs et destinataires.
-- Mettre en place un systeme de seuils multiples.
+### 7.1 Fraude — politique de décision proposée
 
-### 12.2 Ameliorations segmentation
+| Niveau de score | Action recommandée | Justification |
+|-----------------|-------------------|---------------|
+| Score ≥ 0,84 (seuil actuel) | Alerte prioritaire + vérification | Confiance élevée du modèle |
+| Score 0,50 – 0,84 | Revue humaine si type = TRANSFER/CASH_OUT | Zone grise — équilibre coût/risque |
+| Score < 0,50 | Traitement standard | Risque faible sur historique |
 
-- Ajouter une segmentation RFM.
-- Tester PCA avant clustering.
-- Ajouter t-SNE ou UMAP pour visualisation.
-- Nommer officiellement les segments avec les equipes marketing.
-- Evaluer la stabilite des clusters par bootstrap.
-- Relier les clusters a la conversion des campagnes.
+**Priorités opérationnelles** :
 
-### 12.3 Ameliorations MLOps
+1. Traiter en priorité les alertes `TRANSFER` / `CASH_OUT` avec écarts de soldes ;
+2. Mesurer mensuellement recall, precision et volume d'alertes ;
+3. Analyser systématiquement les **3 fraudes manquées** (estimation test) pour comprendre les schémas non captés ;
+4. Ne pas déployer de blocage automatique sans validation temporelle.
 
-- Ajouter MLflow pour tracer les experiences.
-- Ajouter DVC pour versionner les donnees.
-- Ajouter Great Expectations pour valider les schemas.
-- Ajouter GitHub Actions.
-- Dockeriser l'API et le dashboard.
-- Ajouter Evidently AI pour le monitoring de derive.
+### 7.2 Marketing — plan d'action par segment
 
-## 13. Conclusion
+| Segment | Taille | Priorité | Action clé | KPI de succès |
+|---------|-------:|----------|------------|---------------|
+| 0 — Dormants | 1 132 | Moyenne | Réactivation email/promo légère | Taux de réactivation |
+| 1 — Promo digitaux | 42 | Haute (ROI) | Coupons web personnalisés | Taux de conversion promo |
+| 2 — Premium réactifs | 175 | **Critique** | Programme VIP | CLV, fréquence achat |
+| 3 — Fidèles stables | 891 | **Critique** | Cross-sell omnicanal | Panier moyen, rétention |
 
-Le projet dispose maintenant d'une base solide :
+### 7.3 Prédiction et déploiement
 
-- un pipeline de detection de fraude performant ;
-- une segmentation client exploitable ;
-- des modeles sauvegardes ;
-- un dashboard interactif ;
-- une API ;
-- des tests automatiques ;
-- une organisation compatible avec une evolution MLOps.
+Le projet dispose déjà d'une couche de prédiction exploitable :
 
-La prochaine etape prioritaire est de renforcer l'interpretabilite :
+- **Dashboard Streamlit** : permet de visualiser les résultats, tester une transaction et attribuer un segment à un client ;
+- **API FastAPI** : expose les endpoints `/predict/fraud` et `/predict/segment` ;
+- **Modèles sauvegardés** : les pipelines `joblib` incluent preprocessing + modèle, ce qui limite le risque d'incohérence entre entraînement et inférence.
 
-- SHAP pour la fraude ;
-- visualisations de profils pour les clusters ;
-- rapport final avec figures ;
-- presentation claire orientee decision metier.
+#### Exemple de sortie attendue — fraude
+
+```json
+{
+  "prediction": 1,
+  "probability": 0.92,
+  "threshold": 0.84,
+  "model": "xgboost"
+}
+```
+
+**Lecture métier** : une transaction avec une probabilité supérieure au seuil est envoyée en alerte prioritaire. La probabilité permet aussi de trier les alertes par urgence.
+
+#### Exemple de sortie attendue — segmentation
+
+```json
+{
+  "segment": 2,
+  "model": "gmm_k4",
+  "n_input_features": 39
+}
+```
+
+**Lecture métier** : le segment doit être relié à la table de personas. Par exemple, le segment 2 correspond aux clients premium ultra-engagés et appelle une stratégie VIP/personnalisée.
+
+#### Architecture de déploiement recommandée
+
+| Brique | Rôle | Technologie actuelle |
+|--------|------|---------------------|
+| Dashboard | Démonstration, analyse et prédiction interactive | Streamlit |
+| API | Scoring programmé par requête HTTP | FastAPI |
+| Modèles | Artefacts d'inférence | `joblib` |
+| Données | Sources brutes et résultats de modélisation | CSV |
+| Monitoring cible | Suivi performance et dérive | MLflow / Evidently AI à ajouter |
+
+---
+
+## 8. Limites, biais et prudence interprétative
+
+### 8.1 Fraude
+
+| Limite | Impact sur l'interprétation |
+|--------|----------------------------|
+| Dataset potentiellement synthétique ou très structuré | Performance peut être optimiste vs production |
+| Pas de validation temporelle stricte | Risque de sur-estimation si les fraudes changent de schéma |
+| Variables de soldes très prédictives | Si qualité des soldes dégradée en prod, performance chute |
+| Coûts FP/FN non chiffrés | Impossible de justifier formellement le seuil 0,84 |
+| `isFlaggedFraud` exclu | Correct méthodologiquement, mais le modèle ne reproduit pas le système existant |
+
+### 8.2 Segmentation
+
+| Limite | Impact sur l'interprétation |
+|--------|----------------------------|
+| Silhouette modérée (0,21) | Frontières entre clusters floues — certains clients sont « entre deux » |
+| Cluster 1 très petit (42) | Statistiques instables ; campagnes à tester prudemment |
+| Pas d'historique temporel | Segments peuvent évoluer ; recalcul périodique nécessaire |
+| `Response` exclu du clustering | Le modèle ne prédit pas directement la conversion future |
+
+### 8.3 Biais généraux
+
+- **Biais de sur-confiance** : des métriques excellentes peuvent masquer un dataset trop facile ;
+- **Biais de staticité** : les profils sont une photographie, pas une vidéo ;
+- **Biais d'action** : un segment n'est utile que si une action concrète lui est associée.
+
+---
+
+## 9. Conclusion analytique
+
+### Ce que les données nous apprennent
+
+1. **La fraude est un phénomène rare, concentré et structurellement détectable** — surtout via les incohérences de soldes et les types de transaction à risque.
+
+2. **Les modèles avancés (XGBoost) apportent un gain réel** par rapport à une baseline logistique, mais le choix du seuil reste un arbitrage métier, pas un choix statistique pur.
+
+3. **La base client n'est pas homogène** : quatre personas distincts émergent, avec des logiques économiques différentes (dormance, chasse aux promos, premium réactif, fidélité stable).
+
+4. **La segmentation marketing et la détection de fraude répondent à des logiques opposées** : en fraude, on cherche la rareté et l'anomalie ; en marketing, on cherche la régularité et la ressemblance. Les deux démarches sont complémentaires.
+
+### Ce qui reste à confirmer
+
+L'analyse actuelle permet de formuler des recommandations, mais plusieurs points méritent une validation supplémentaire avant toute généralisation :
+
+- **Explicabilité des alertes fraude** : le modèle performe, mais sans analyse des contributions individuelles (ex. SHAP), il reste difficile d'expliquer au métier *pourquoi* une transaction est bloquée — ce qui limite la confiance des équipes de revue manuelle.
+- **Robustesse dans le temps** : les résultats sont évalués sur un split aléatoire ; une découpe par période (`step`) vérifierait si le modèle tient face à l'évolution des schémas de fraude.
+- **Actionnabilité des segments** : les profils clusters 0 et 1 (dormants et promo-chasseurs) sont les plus incertains statistiquement ; seule une campagne test mesurerait si la segmentation se traduit en réactivation ou en ROI réel.
+- **Stabilité des personas** : sans recalcul périodique, on ne sait pas si les quatre segments restent valides ou si les clients migrent d'un profil à l'autre au fil des trimestres.

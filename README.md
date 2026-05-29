@@ -500,15 +500,23 @@ Tests interactifs : ouvrir le dashboard Streamlit ou la documentation Swagger.
 
 | Livrable | Emplacement | Statut |
 |----------|-------------|--------|
-| Notebooks EDA | `notebooks/` | ✅ |
+| Notebooks EDA | `notebooks/01_*.ipynb`, `03_*.ipynb` | ✅ |
+| Notebooks modélisation | `notebooks/02_*.ipynb`, `04_*.ipynb` | ✅ |
 | Scripts d'entraînement | `src/models/` | ✅ |
 | Modèles sauvegardés | `models/` | ✅ |
 | Dashboard Streamlit | `dashboard/app.py` | ✅ ([en ligne](https://kokou-ml.streamlit.app/)) |
 | API FastAPI | `src/api/main.py` | ✅ ([en ligne](https://kokou-ml.onrender.com/docs)) |
 | Tests | `tests/` | ✅ |
+| Rapport d'analyse (MD + PDF) | `reports/rapport_technique.md`, `.pdf` | ✅ |
+| Présentation finale | `reports/presentation_finale.pptx` | ✅ |
 | Plan de présentation | `reports/presentation_outline.md` | ✅ |
-| Rapport technique | `reports/rapport_technique.md` | 🔄 |
-| Présentation finale | `reports/` | 🔄 |
+
+### Regénérer PDF et PPTX
+
+```bash
+pip install python-pptx markdown xhtml2pdf
+python scripts/generate_deliverables.py
+```
 
 ---
 
@@ -541,5 +549,5 @@ Tests interactifs : ouvrir le dashboard Streamlit ou la documentation Swagger.
 
 ## Auteurs
 
-**M2 CDSD** — Projet Machine Learning  
-*(Compléter avec noms des membres du groupe)*
+**Kokou Godwin TCHAKPANA** — M2 CDSD  
+Projet Machine Learning : détection de fraude et segmentation client

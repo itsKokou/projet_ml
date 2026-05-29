@@ -1,12 +1,15 @@
-"""Dashboard Streamlit avance pour resultats ML."""
+"""Dashboard Streamlit avancé pour résultats ML."""
 
 from __future__ import annotations
 
+import base64
+import html
 import json
+import re
 import sys
 from pathlib import Path
 
-# Permet d'importer `src.*` quand Streamlit execute depuis `dashboard/`.
+# Permet d'importer `src.*` quand Streamlit exécute depuis `dashboard/`.
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -27,32 +30,39 @@ from src.features.build_features import build_cluster_features, build_fraud_feat
 FRAUD_DIR = PROJECT_ROOT / "models" / "fraud"
 CLUSTER_DIR = PROJECT_ROOT / "models" / "clustering"
 DATA_DIR = PROJECT_ROOT / "data" / "raw"
+REPORT_PATH = PROJECT_ROOT / "reports" / "rapport_technique.md"
+REPORT_PDF_PATH = PROJECT_ROOT / "reports" / "rapport_technique.pdf"
+PRESENTATION_PPTX_PATH = PROJECT_ROOT / "reports" / "presentation_finale.pptx"
+REPORT_DIR = PROJECT_ROOT / "reports"
+_REPORT_IMG_RE = re.compile(
+    r"!\[(?P<alt>[^\]]*)\]\((?P<path>[^)\s]+)(?:\s+\"[^\"]*\")?\)"
+)
 
 FRAUD_MODEL_ORDER = ["xgboost", "random_forest", "logistic_regression"]
 SEGMENT_NAMES = {
     0: "Faible valeur / faible engagement",
     1: "Promotionnel et digital",
-    2: "Premium tres reactif",
+    2: "Premium très réactif",
     3: "Forte valeur stable",
 }
 SEGMENT_ACTIONS = {
-    0: "Reactivation, offres accessibles, parcours d'onboarding.",
+    0: "Réactivation, offres accessibles, parcours d'onboarding.",
     1: "Coupons, retargeting web, bundles promotionnels.",
-    2: "Programme VIP, avant-premieres, offres premium.",
-    3: "Fidelisation, cross-sell, experience omnicanale.",
+    2: "Programme VIP, avant-premières, offres premium.",
+    3: "Fidélisation, cross-sell, expérience omnicanale.",
 }
 NAV_ITEMS = [
     {
         "slug": "overview",
         "label": "Vue d'ensemble",
         "short": "Pilotage",
-        "description": "KPI globaux, donnees, modeles retenus et signaux metier.",
+        "description": "KPI globaux, comparaison des modèles et signaux métier.",
     },
     {
         "slug": "fraud",
         "label": "Fraude",
-        "short": "Detection",
-        "description": "Performance des modeles, seuil, analyse transactionnelle et simulateur.",
+        "short": "Détection",
+        "description": "Performance des modèles, seuil, analyse transactionnelle et simulateur.",
     },
     {
         "slug": "segmentation",
@@ -63,20 +73,26 @@ NAV_ITEMS = [
     {
         "slug": "recommendations",
         "label": "Recommandations",
-        "short": "Decisions",
-        "description": "Actions metier pour la fraude, le marketing et la prochaine iteration.",
+        "short": "Décisions",
+        "description": "Actions métier pour la fraude, le marketing et la prochaine itération.",
     },
     {
         "slug": "prediction",
-        "label": "Prediction",
+        "label": "Prédiction",
         "short": "Scoring",
-        "description": "Tester les predictions fraude et segmentation, puis voir les endpoints API.",
+        "description": "Tester les prédictions fraude et segmentation, puis voir les endpoints API.",
     },
     {
         "slug": "mlops",
         "label": "MLOps",
         "short": "Industrialisation",
         "description": "Artefacts, API, pipeline cible et roadmap technique.",
+    },
+    {
+        "slug": "report",
+        "label": "Rapport d'analyse",
+        "short": "Interprétation",
+        "description": "Rapport PDF, présentation PPTX et aperçu en ligne.",
     },
 ]
 NAV_BY_SLUG = {item["slug"]: item for item in NAV_ITEMS}
@@ -91,14 +107,217 @@ st.set_page_config(
 
 
 def inject_style() -> None:
-    """Garde une fonction dediee au style, sans HTML brut."""
-    return None
+    """Styles globaux du dashboard (cartes KPI, etc.)."""
+    st.markdown(
+        """
+        <style>
+        .kpi-card {
+            border-radius: 12px;
+            padding: 0.9rem 1rem;
+            margin-bottom: 0.25rem;
+            box-shadow: 0 6px 18px rgba(16, 24, 40, 0.1);
+            min-height: 92px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        .kpi-label {
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            opacity: 0.92;
+            margin-bottom: 0.4rem;
+        }
+        .kpi-value {
+            font-size: 1.28rem;
+            font-weight: 700;
+            line-height: 1.25;
+            word-break: break-word;
+        }
+        .kpi-teal {
+            background: linear-gradient(145deg, #157f7f 0%, #1babab 100%);
+            color: #ffffff;
+        }
+        .kpi-rose {
+            background: linear-gradient(145deg, #9f1239 0%, #c2415c 100%);
+            color: #ffffff;
+        }
+        .kpi-blue {
+            background: linear-gradient(145deg, #1e4a7a 0%, #3b6ea8 100%);
+            color: #ffffff;
+        }
+        .kpi-indigo {
+            background: linear-gradient(145deg, #3730a3 0%, #6366f1 100%);
+            color: #ffffff;
+        }
+        .kpi-emerald {
+            background: linear-gradient(145deg, #047857 0%, #10b981 100%);
+            color: #ffffff;
+        }
+        .kpi-amber {
+            background: linear-gradient(145deg, #92400e 0%, #d97706 100%);
+            color: #ffffff;
+        }
+        .kpi-violet {
+            background: linear-gradient(145deg, #5b21b6 0%, #8b5cf6 100%);
+            color: #ffffff;
+        }
+        .kpi-slate {
+            background: linear-gradient(145deg, #334155 0%, #64748b 100%);
+            color: #ffffff;
+        }
+
+        /* Sidebar — theme teal / slate */
+        [data-testid="stSidebar"] {
+            background: linear-gradient(
+                180deg,
+                #0c3d3d 0%,
+                #157f7f 42%,
+                #1e4a6e 100%
+            );
+        }
+        [data-testid="stSidebar"] > div:first-child {
+            background: transparent;
+        }
+        [data-testid="stSidebar"] [data-testid="stSidebarContent"] {
+            background: transparent;
+        }
+        [data-testid="stSidebar"] h1,
+        [data-testid="stSidebar"] h2,
+        [data-testid="stSidebar"] h3,
+        [data-testid="stSidebar"] p,
+        [data-testid="stSidebar"] label,
+        [data-testid="stSidebar"] span,
+        [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] {
+            color: #ecfdf5 !important;
+        }
+        [data-testid="stSidebar"] [data-testid="stCaptionContainer"] p {
+            color: rgba(236, 253, 245, 0.78) !important;
+        }
+        [data-testid="stSidebar"] hr {
+            border-color: rgba(255, 255, 255, 0.22);
+            margin: 0.85rem 0;
+        }
+        [data-testid="stSidebar"] [data-testid="stMetricLabel"] {
+            color: rgba(236, 253, 245, 0.75) !important;
+        }
+        [data-testid="stSidebar"] [data-testid="stMetricValue"] {
+            color: #ffffff !important;
+            font-weight: 600;
+        }
+        [data-testid="stSidebar"] .stButton > button {
+            border-radius: 10px;
+            font-weight: 600;
+            transition: background 0.15s ease, transform 0.1s ease;
+        }
+        [data-testid="stSidebar"] .stButton > button[kind="secondary"] {
+            background-color: rgba(255, 255, 255, 0.1) !important;
+            color: #ecfdf5 !important;
+            border: 1px solid rgba(255, 255, 255, 0.28) !important;
+        }
+        [data-testid="stSidebar"] .stButton > button[kind="secondary"]:hover {
+            background-color: rgba(255, 255, 255, 0.18) !important;
+            border-color: rgba(255, 255, 255, 0.45) !important;
+        }
+        [data-testid="stSidebar"] .stButton > button[kind="primary"] {
+            background-color: #ffffff !important;
+            color: #0f4f4f !important;
+            border: none !important;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+        [data-testid="stSidebar"] .stButton > button:disabled {
+            opacity: 1 !important;
+            background-color: rgba(255, 255, 255, 0.22) !important;
+            color: #ffffff !important;
+            border: 1px solid rgba(255, 255, 255, 0.35) !important;
+        }
+        [data-testid="stSidebar"] [data-testid="collapsedControl"] {
+            color: #ecfdf5;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_kpi_card(column, label: str, value: str, variant: str = "teal") -> None:
+    """Affiche un KPI dans une carte colorée."""
+    safe_label = html.escape(label)
+    safe_value = html.escape(str(value))
+    with column:
+        st.markdown(
+            f"""
+            <div class="kpi-card kpi-{html.escape(variant)}">
+                <div class="kpi-label">{safe_label}</div>
+                <div class="kpi-value">{safe_value}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
 
 def read_json(path: Path) -> dict:
     if not path.exists():
         return {}
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+@st.cache_data(show_spinner=False)
+def load_technical_report() -> str:
+    """Charge le rapport technique markdown."""
+    if not REPORT_PATH.exists():
+        return ""
+    return REPORT_PATH.read_text(encoding="utf-8")
+
+
+@st.cache_data(show_spinner=False)
+def load_report_pdf() -> bytes:
+    """Charge le rapport PDF pour téléchargement."""
+    if not REPORT_PDF_PATH.is_file():
+        return b""
+    return REPORT_PDF_PATH.read_bytes()
+
+
+@st.cache_data(show_spinner=False)
+def load_presentation_pptx() -> bytes:
+    """Charge la présentation PPTX pour téléchargement."""
+    if not PRESENTATION_PPTX_PATH.is_file():
+        return b""
+    return PRESENTATION_PPTX_PATH.read_bytes()
+
+
+def _resolve_report_image(match: re.Match[str]) -> str:
+    """Convertit une image markdown en balise HTML avec chemin résolu."""
+    alt = html.escape(match.group("alt"))
+    raw_path = match.group("path").strip()
+    if raw_path.startswith(("http://", "https://", "data:")):
+        return match.group(0)
+
+    image_path = (REPORT_DIR / raw_path).resolve()
+    if not image_path.is_file():
+        return f"*Figure introuvable : `{raw_path}`*"
+
+    mime_by_ext = {
+        "png": "image/png",
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "gif": "image/gif",
+        "webp": "image/webp",
+    }
+    ext = image_path.suffix.lower().lstrip(".")
+    mime = mime_by_ext.get(ext, "image/png")
+    encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
+    return (
+        f'<img src="data:{mime};base64,{encoded}" alt="{alt}" '
+        'style="max-width:100%; height:auto; margin:1rem 0;" />'
+    )
+
+
+def render_report_markdown(content: str) -> None:
+    """Affiche le rapport en résolvant les chemins d'images du dossier reports/."""
+    resolved = _REPORT_IMG_RE.sub(_resolve_report_image, content)
+    st.markdown(resolved, unsafe_allow_html=True)
 
 
 @st.cache_data(show_spinner=False)
@@ -146,8 +365,8 @@ def load_cluster_profiles() -> pd.DataFrame:
     if not path.exists():
         return pd.DataFrame()
     profiles = pd.read_csv(path)
-    profiles["segment"] = profiles["cluster"].map(SEGMENT_NAMES).fillna("Segment non nomme")
-    profiles["action"] = profiles["cluster"].map(SEGMENT_ACTIONS).fillna("Analyse complementaire.")
+    profiles["segment"] = profiles["cluster"].map(SEGMENT_NAMES).fillna("Segment non nommé")
+    profiles["action"] = profiles["cluster"].map(SEGMENT_ACTIONS).fillna("Analyse complémentaire.")
     return profiles
 
 
@@ -246,13 +465,13 @@ def render_sidebar_navigation(active_slug: str) -> None:
     best_cluster = _best_cluster_name()
 
     st.sidebar.title("Projet ML M2 CDSD")
-    st.sidebar.caption("Fraude bancaire, segmentation client et MLOps")
+    st.sidebar.caption("Fraude bancaire · Segmentation client · MLOps")
     st.sidebar.divider()
 
     st.sidebar.subheader("Navigation")
     for item in NAV_ITEMS:
         is_active = item["slug"] == active_slug
-        label = item["label"] if not is_active else f"{item['label']} - actif"
+        label = item["label"] if not is_active else f"▸ {item['label']}"
         st.sidebar.button(
             label,
             key=f"sidebar_nav_{item['slug']}",
@@ -264,22 +483,22 @@ def render_sidebar_navigation(active_slug: str) -> None:
         )
 
     st.sidebar.divider()
-    st.sidebar.subheader("Statut modeles")
-    st.sidebar.metric("Modele fraude", best_fraud)
+    st.sidebar.subheader("Statut des modèles")
+    st.sidebar.metric("Modèle de fraude", best_fraud)
     st.sidebar.metric("PR-AUC", f"{_metric_value(fraud_cmp, best_fraud, 'pr_auc'):.4f}")
     st.sidebar.metric("Clustering", best_cluster)
     st.sidebar.metric("Silhouette", f"{_metric_value(cluster_cmp, best_cluster, 'silhouette'):.4f}")
-    st.sidebar.divider()
-    st.sidebar.markdown(
-        """
-        **Artefacts**
+    # st.sidebar.divider()
+    # st.sidebar.markdown(
+    #     """
+    #     **Artefacts**
 
-        - `models/fraud/`
-        - `models/clustering/`
-        - `reports/rapport_technique.md`
-        - `reports/presentation_outline.md`
-        """
-    )
+    #     - `models/fraud/`
+    #     - `models/clustering/`
+    #     - `reports/rapport_technique.md`
+    #     - `reports/presentation_outline.md`
+    #     """
+    # )
 
 
 @st.cache_data(show_spinner=False)
@@ -451,6 +670,394 @@ def fraud_feature_importance(top_n: int = 15) -> pd.DataFrame:
     return out.sort_values("importance", ascending=False).head(top_n)
 
 
+def _prettify_fraud_feature(name: str) -> str:
+    raw = (
+        str(name)
+        .replace("num__", "")
+        .replace("cat__", "")
+        .replace("type_", "type=")
+    )
+    labels = {
+        "origin_error": "Écart solde émetteur",
+        "dest_error": "Écart solde destinataire",
+        "origin_balance_diff": "Variation solde émetteur",
+        "dest_balance_diff": "Variation solde destinataire",
+        "amount": "Montant",
+        "amount_to_oldbalance_ratio": "Ratio montant / solde",
+        "is_transfer_or_cashout": "TRANSFER ou CASH_OUT",
+        "is_zero_newbalance_origin": "Solde émetteur à zéro après tx",
+        "is_zero_oldbalance_dest": "Solde destinataire nul avant tx",
+        "step": "Horodatage (step)",
+        "step_bucket": "Fenêtre temporelle",
+        "oldbalanceOrg": "Solde émetteur avant",
+        "newbalanceOrig": "Solde émetteur après",
+        "oldbalanceDest": "Solde destinataire avant",
+        "newbalanceDest": "Solde destinataire après",
+    }
+    return labels.get(raw, raw.replace("_", " "))
+
+
+def _shap_positive_class(shap_values) -> np.ndarray:
+    if isinstance(shap_values, list):
+        return np.asarray(shap_values[1])
+    values = np.asarray(shap_values)
+    if values.ndim == 3:
+        return values[:, :, 1]
+    return values
+
+
+def _fraud_features_from_inputs(
+    step: int,
+    tx_type: str,
+    amount: float,
+    old_org: float,
+    new_org: float,
+    old_dest: float,
+    new_dest: float,
+) -> pd.DataFrame:
+    row = pd.DataFrame(
+        [
+            {
+                "step": step,
+                "type": tx_type,
+                "amount": amount,
+                "oldbalanceOrg": old_org,
+                "newbalanceOrig": new_org,
+                "oldbalanceDest": old_dest,
+                "newbalanceDest": new_dest,
+            }
+        ]
+    )
+    features = build_fraud_features(preprocess_fraud(row))
+    drop_cols = [c for c in ("nameOrig", "nameDest", "isFlaggedFraud") if c in features.columns]
+    return features.drop(columns=drop_cols)
+
+
+def _predict_fraud_transaction(
+    model,
+    step: int,
+    tx_type: str,
+    amount: float,
+    old_org: float,
+    new_org: float,
+    old_dest: float,
+    new_dest: float,
+) -> tuple[float, pd.DataFrame]:
+    """Retourne (probabilité fraude, features enrichies)."""
+    features = _fraud_features_from_inputs(step, tx_type, amount, old_org, new_org, old_dest, new_dest)
+    model_input = _align_to_expected_columns(features, model)
+    proba = float(model.predict_proba(model_input)[0, 1])
+    return proba, features
+
+
+def _build_fraud_shap_matrix(
+    model, sample_size: int = 4000
+) -> tuple[np.ndarray | None, list[str] | None, np.ndarray | None]:
+    df = load_fraud_sample(200_000)
+    if df.empty or "isFraud" not in df.columns:
+        return None, None, None
+
+    fraud = df[df["isFraud"].astype(int) == 1]
+    normal = df[df["isFraud"].astype(int) == 0]
+    n_fraud = len(fraud)
+    n_normal = max(sample_size - n_fraud, 0)
+    if n_normal > 0 and len(normal) > n_normal:
+        normal = normal.sample(n_normal, random_state=42)
+    sample = pd.concat([fraud, normal], ignore_index=True)
+
+    X = build_fraud_features(preprocess_fraud(sample.drop(columns=["isFraud"])))
+    X = X.drop(columns=[c for c in ("nameOrig", "nameDest", "isFlaggedFraud") if c in X.columns])
+    X = _align_to_expected_columns(X, model)
+    preprocessor = model.named_steps["preprocessor"]
+    X_t = preprocessor.transform(X)
+    names = [_prettify_fraud_feature(n) for n in preprocessor.get_feature_names_out()]
+    y = sample["isFraud"].astype(int).to_numpy()
+    return X_t, names, y
+
+
+@st.cache_resource(show_spinner=False)
+def _fraud_shap_explainer_bundle():
+    import shap
+
+    model = load_fraud_model()
+    if model is None:
+        return None
+
+    classifier = model.named_steps.get("classifier")
+    if classifier is None:
+        return None
+
+    X_t, names, y = _build_fraud_shap_matrix(model, sample_size=5000)
+    if X_t is None or y is None:
+        return None
+
+    try:
+        if hasattr(classifier, "feature_importances_"):
+            explainer = shap.TreeExplainer(classifier)
+        else:
+            background = shap.sample(X_t, min(400, len(X_t)), random_state=42)
+            explainer = shap.LinearExplainer(classifier, background)
+        return {"explainer": explainer, "names": names, "X_t": X_t, "y": y}
+    except Exception:
+        return None
+
+
+@st.cache_data(show_spinner="Calcul SHAP global…")
+def fraud_shap_global_summary(top_n: int = 12) -> pd.DataFrame:
+    bundle = _fraud_shap_explainer_bundle()
+    if not bundle:
+        return pd.DataFrame()
+
+    sv = _shap_positive_class(bundle["explainer"].shap_values(bundle["X_t"]))
+    return (
+        pd.DataFrame(
+            {
+                "feature": bundle["names"],
+                "mean_abs_shap": np.abs(sv).mean(axis=0),
+                "mean_shap": sv.mean(axis=0),
+            }
+        )
+        .sort_values("mean_abs_shap", ascending=False)
+        .head(top_n)
+    )
+
+
+@st.cache_data(show_spinner="Calcul SHAP local…")
+def fraud_shap_local_contributions(
+    step: int,
+    tx_type: str,
+    amount: float,
+    old_org: float,
+    new_org: float,
+    old_dest: float,
+    new_dest: float,
+    top_n: int = 10,
+) -> pd.DataFrame:
+    bundle = _fraud_shap_explainer_bundle()
+    model = load_fraud_model()
+    if not bundle or model is None:
+        return pd.DataFrame()
+
+    features = _fraud_features_from_inputs(step, tx_type, amount, old_org, new_org, old_dest, new_dest)
+    features = _align_to_expected_columns(features, model)
+    X_t = model.named_steps["preprocessor"].transform(features)
+    sv = _shap_positive_class(bundle["explainer"].shap_values(X_t))[0]
+
+    out = pd.DataFrame({"feature": bundle["names"], "shap": sv})
+    out["abs_shap"] = out["shap"].abs()
+    return out.sort_values("abs_shap", ascending=False).head(top_n)
+
+
+def _shap_insight_text(feature: str, mean_shap: float) -> str:
+    direction = "augmente" if mean_shap >= 0 else "diminue"
+    f = feature.lower()
+    if "écart solde émetteur" in f or "origin_error" in f:
+        return (
+            f"En moyenne, un écart entre montant et solde émetteur {direction} fortement "
+            "la probabilité de fraude — signal d'incohérence comptable."
+        )
+    if "écart solde destinataire" in f or "dest_error" in f:
+        return (
+            f"Les écarts côté destinataire {direction} aussi le score : utile pour repérer "
+            "des flux qui ne recollent pas aux soldes."
+        )
+    if "montant" in f and "ratio" not in f:
+        return (
+            f"Le montant {direction} le risque, surtout lorsque les soldes ne justifient pas "
+            "le transfert."
+        )
+    if "ratio" in f:
+        return (
+            f"Un ratio montant / solde élevé {direction} le score : peu de marge sur le solde "
+            "avant transaction."
+        )
+    if "transfer" in f or "cash_out" in f or "type=" in f:
+        return (
+            f"Le type de transaction {direction} le risque : TRANSFER et CASH_OUT restent "
+            "les canaux les plus touchés dans les données."
+        )
+    if "zéro" in f or "zero" in f:
+        return (
+            f"Un solde vidé ou nul {direction} la suspicion — pattern fréquent sur les "
+            "comptes compromis."
+        )
+    return (
+        f"La variable « {feature} » {direction} la probabilité de fraude sur l'échantillon "
+        "analysé (SHAP moyen)."
+    )
+
+
+def _plot_shap_bar(df: pd.DataFrame, value_col: str, title: str, height: int = 380) -> go.Figure:
+    plot_df = df.sort_values(value_col, ascending=True).copy()
+    if value_col == "shap":
+        colors = ["#c2415c" if v > 0 else "#157f7f" for v in plot_df["shap"]]
+    else:
+        colors = "#157f7f"
+    fig = go.Figure(
+        go.Bar(
+            x=plot_df[value_col],
+            y=plot_df["feature"],
+            orientation="h",
+            marker_color=colors,
+        )
+    )
+    fig.update_layout(title=title, xaxis_title="Contribution SHAP", yaxis_title="", height=height)
+    return fig
+
+
+def _render_local_shap_block(
+    step: int,
+    tx_type: str,
+    amount: float,
+    old_org: float,
+    new_org: float,
+    old_dest: float,
+    new_dest: float,
+    proba: float | None = None,
+) -> None:
+    local = fraud_shap_local_contributions(step, tx_type, amount, old_org, new_org, old_dest, new_dest)
+    if local.empty:
+        st.caption("Contributions SHAP indisponibles pour ce modèle.")
+        return
+
+    if proba is not None:
+        st.caption(f"Score modèle : **{proba:.4f}** — barres rouges = poussent vers la fraude, vertes = freinent.")
+    fig = _plot_shap_bar(local, "shap", "Contributions à la probabilité de fraude", height=320)
+    st.plotly_chart(plotly_layout(fig, 320), width="stretch")
+
+    pushes = local[local["shap"] > 0].head(3)
+    if not pushes.empty:
+        bullets = ", ".join(f"**{r.feature}** ({r.shap:+.3f})" for r in pushes.itertuples())
+        st.markdown(f"Principaux facteurs qui **renforcent** l'alerte : {bullets}.")
+
+
+def render_fraud_shap_tab() -> None:
+    """Coquille légère : le calcul SHAP n'est lancé qu'après action utilisateur."""
+    if not st.session_state.get("fraud_shap_loaded"):
+        st.info(
+            "L'analyse SHAP charge un échantillon de transactions et peut prendre **10 à 30 secondes**. "
+            "Elle n'est pas lancée automatiquement afin de ne pas ralentir le simulateur."
+        )
+        if st.button("Charger l'analyse SHAP", type="primary", key="btn_load_fraud_shap"):
+            st.session_state["fraud_shap_loaded"] = True
+            st.rerun()
+        return
+    _render_fraud_shap_tab_content()
+
+
+def _render_fraud_shap_tab_content() -> None:
+    model = load_fraud_model()
+    if model is None:
+        st.warning("Chargez un modèle fraude (`python -m src.models.train_fraud_model`) pour activer SHAP.")
+        return
+
+    st.caption(
+        f"Modèle : **{_best_fraud_name()}** — SHAP indique comment chaque variable déplace la probabilité "
+        "de fraude (référence = comportement moyen sur un échantillon stratifié)."
+    )
+
+    global_df = fraud_shap_global_summary()
+    if global_df.empty:
+        st.info(
+            "SHAP n'est pas disponible pour ce classifieur (utilisez XGBoost, forêt aléatoire ou régression logistique)."
+        )
+        return
+
+    st.subheader("Trois leçons globales")
+    insight_cols = st.columns(3)
+    for col, (_, row) in zip(insight_cols, global_df.head(3).iterrows()):
+        with col:
+            render_insight(row["feature"], _shap_insight_text(row["feature"], float(row["mean_shap"])))
+
+    st.subheader("Importance globale (|SHAP| moyen)")
+    fig = _plot_shap_bar(
+        global_df.sort_values("mean_abs_shap").tail(12),
+        "mean_abs_shap",
+        "Variables qui déplacent le plus le score, en moyenne",
+        height=420,
+    )
+    st.plotly_chart(plotly_layout(fig, 420), width="stretch")
+
+    st.divider()
+    st.subheader("Explication d'une transaction")
+    examples = fraud_suspicious_examples(6)
+    preset_labels: list[str] = []
+    preset_rows: list[dict] = []
+
+    if not examples.empty:
+        for idx, (_, row) in enumerate(examples.iterrows()):
+            label = (
+                f"Fraude #{idx + 1} — {row.get('type', '?')} "
+                f"{float(row.get('amount', 0)):,.0f} €"
+            )
+            preset_labels.append(label)
+            preset_rows.append(
+                {
+                    "step": int(row["step"]),
+                    "type": str(row["type"]),
+                    "amount": float(row["amount"]),
+                    "oldbalanceOrg": float(row["oldbalanceOrg"]),
+                    "newbalanceOrig": float(row["newbalanceOrig"]),
+                    "oldbalanceDest": float(row["oldbalanceDest"]),
+                    "newbalanceDest": float(row["newbalanceDest"]),
+                }
+            )
+
+    choice = st.selectbox(
+        "Transaction à expliquer",
+        ["Saisie manuelle (simulateur)"] + preset_labels,
+        index=1 if preset_labels else 0,
+    )
+
+    if choice == "Saisie manuelle (simulateur)":
+        c1, c2, c3, c4 = st.columns(4)
+        step = c1.number_input("Step", min_value=1, value=1, key="shap_step")
+        tx_type = c2.selectbox(
+            "Type",
+            ["TRANSFER", "CASH_OUT", "PAYMENT", "CASH_IN", "DEBIT"],
+            key="shap_type",
+        )
+        amount = c3.number_input("Montant", min_value=0.0, value=1000.0, step=100.0, key="shap_amount")
+        old_org = c4.number_input(
+            "Solde émetteur avant", min_value=0.0, value=2000.0, step=100.0, key="shap_old_org"
+        )
+        new_org = c1.number_input(
+            "Solde émetteur après", min_value=0.0, value=1000.0, step=100.0, key="shap_new_org"
+        )
+        old_dest = c2.number_input(
+            "Solde destinataire avant", min_value=0.0, value=500.0, step=100.0, key="shap_old_dest"
+        )
+        new_dest = c3.number_input(
+            "Solde destinataire après", min_value=0.0, value=1500.0, step=100.0, key="shap_new_dest"
+        )
+    else:
+        payload = preset_rows[preset_labels.index(choice)]
+        step = payload["step"]
+        tx_type = payload["type"]
+        amount = payload["amount"]
+        old_org = payload["oldbalanceOrg"]
+        new_org = payload["newbalanceOrig"]
+        old_dest = payload["oldbalanceDest"]
+        new_dest = payload["newbalanceDest"]
+        st.info(
+            f"Exemple réel du jeu de données : **{tx_type}**, montant **{amount:,.0f}**, "
+            f"fraude confirmée (isFraud=1)."
+        )
+
+    proba, _ = _predict_fraud_transaction(
+        model, step, tx_type, amount, old_org, new_org, old_dest, new_dest
+    )
+    comparison = load_fraud_comparison()
+    threshold = _metric_value(comparison, _best_fraud_name(), "threshold", 0.5)
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Probabilité fraude", f"{proba:.4f}")
+    m2.metric("Seuil modèle", f"{threshold:.2f}")
+    m3.metric("Décision", "Alerte" if proba >= threshold else "OK")
+
+    _render_local_shap_block(step, tx_type, amount, old_org, new_org, old_dest, new_dest, proba=proba)
+
+
 @st.cache_data(show_spinner=False)
 def cluster_projection(sample_size: int = 2240) -> pd.DataFrame:
     model = load_cluster_model()
@@ -484,7 +1091,7 @@ def cluster_projection(sample_size: int = 2240) -> pd.DataFrame:
     proj = pd.DataFrame({"PC1": coords[:, 0], "PC2": coords[:, 1], "cluster": labels})
     for col in meta.columns:
         proj[col] = meta[col].to_numpy()
-    proj["segment"] = proj["cluster"].map(SEGMENT_NAMES).fillna("Segment non nomme")
+    proj["segment"] = proj["cluster"].map(SEGMENT_NAMES).fillna("Segment non nommé")
     return proj
 
 
@@ -506,7 +1113,7 @@ def cluster_enriched_dataset() -> pd.DataFrame:
     cluster_model = model.named_steps["clustering"]
     labels = cluster_model.predict(transformed) if hasattr(cluster_model, "predict") else cluster_model.fit_predict(transformed)
     out["cluster"] = labels
-    out["segment"] = out["cluster"].map(SEGMENT_NAMES).fillna("Segment non nomme")
+    out["segment"] = out["cluster"].map(SEGMENT_NAMES).fillna("Segment non nommé")
     return out
 
 
@@ -564,7 +1171,7 @@ def render_insight(title: str, text: str) -> None:
 def show_overview() -> None:
     render_header(
         "Pilotage fraude et segmentation",
-        "Synthese operationnelle des modeles, des donnees et des decisions metier.",
+        "Synthèse opérationnelle : données, modèles retenus et signaux métier.",
     )
 
     fraud_cmp = load_fraud_comparison()
@@ -578,19 +1185,42 @@ def show_overview() -> None:
     fraud_rate = float(fraud_df["isFraud"].mean()) if not fraud_df.empty else 0.0
     best_pr_auc = _metric_value(fraud_cmp, best_fraud, "pr_auc")
     best_recall = _metric_value(fraud_cmp, best_fraud, "recall")
+    best_precision = _metric_value(fraud_cmp, best_fraud, "precision")
+    best_threshold = _metric_value(fraud_cmp, best_fraud, "threshold")
     best_silhouette = _metric_value(cluster_cmp, best_cluster, "silhouette")
+    n_clients = len(cluster_df)
+    premium_share = 0.0
+    if not profiles.empty and "cluster_size" in profiles.columns:
+        total_clients = float(profiles["cluster_size"].sum())
+        if total_clients > 0 and 2 in profiles["cluster"].to_numpy():
+            premium_share = float(profiles.loc[profiles["cluster"] == 2, "cluster_size"].iloc[0]) / total_clients
 
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("Transactions analysees", f"{len(fraud_df):,}".replace(",", " "))
-    c2.metric("Taux de fraude", _format_percent(fraud_rate, 3))
-    c3.metric("Modele fraude", best_fraud)
-    c4.metric("PR-AUC fraude", f"{best_pr_auc:.4f}")
-    c5.metric("Silhouette segments", f"{best_silhouette:.4f}")
+    st.subheader("Indicateurs clés")
+    r1c1, r1c2, r1c3, r1c4, r1c5, r1c6 = st.columns(6)
+    render_kpi_card(r1c1, "Échantillon fraude", f"{len(fraud_df):,}".replace(",", " "), "teal")
+    render_kpi_card(r1c2, "Taux de fraude", _format_percent(fraud_rate, 3), "rose")
+    render_kpi_card(r1c3, "PR-AUC (test)", f"{best_pr_auc:.4f}", "blue")
+    render_kpi_card(r1c4, "Rappel (test)", _format_percent(best_recall, 1), "indigo")
+    render_kpi_card(r1c5, "Précision (test)", _format_percent(best_precision, 1), "emerald")
+    render_kpi_card(r1c6, "Seuil retenu", f"{best_threshold:.2f}", "amber")
+
+    r2c1, r2c2, r2c3, r2c4, r2c5, r2c6 = st.columns(6)
+    render_kpi_card(
+        r2c1,
+        "Clients",
+        f"{n_clients:,}".replace(",", " ") if n_clients else "—",
+        "slate",
+    )
+    render_kpi_card(r2c2, "Modèle fraude", best_fraud, "teal")
+    render_kpi_card(r2c3, "Modèle clustering", best_cluster, "violet")
+    render_kpi_card(r2c4, "Silhouette", f"{best_silhouette:.4f}", "indigo")
+    render_kpi_card(r2c5, "Segments", "4" if not profiles.empty else "—", "blue")
+    render_kpi_card(r2c6, "Part premium (C2)", _format_percent(premium_share, 1), "rose")
 
     st.divider()
 
-    left, right = st.columns([1.15, 0.85])
-    with left:
+    chart_left, chart_right = st.columns([1.15, 0.85])
+    with chart_left:
         fraud_summary = fraud_type_summary()
         if not fraud_summary.empty:
             fig = px.bar(
@@ -604,9 +1234,25 @@ def show_overview() -> None:
             )
             fig.update_traces(textposition="outside")
             fig.update_yaxes(tickformat=".2%")
-            st.plotly_chart(plotly_layout(fig, 390), width="stretch")
+            st.plotly_chart(plotly_layout(fig, 380), width="stretch")
 
-    with right:
+        if not fraud_cmp.empty:
+            ordered = [m for m in FRAUD_MODEL_ORDER if m in fraud_cmp.index]
+            cmp_view = fraud_cmp.loc[ordered if ordered else fraud_cmp.index]
+            fig_cmp = px.bar(
+                cmp_view.reset_index(),
+                x="index",
+                y="pr_auc",
+                color="index",
+                color_discrete_sequence=px.colors.qualitative.Set2,
+                text=cmp_view["pr_auc"].map(lambda x: f"{x:.3f}"),
+                title="Comparaison des modèles — PR-AUC",
+            )
+            fig_cmp.update_traces(textposition="outside")
+            fig_cmp.update_layout(showlegend=False)
+            st.plotly_chart(plotly_layout(fig_cmp, 320), width="stretch")
+
+    with chart_right:
         if not profiles.empty:
             fig = px.pie(
                 profiles,
@@ -614,37 +1260,52 @@ def show_overview() -> None:
                 values="cluster_size",
                 hole=0.52,
                 color_discrete_sequence=px.colors.qualitative.Set2,
-                title="Repartition des segments clients",
+                title="Répartition des segments clients",
             )
-            st.plotly_chart(plotly_layout(fig, 390), width="stretch")
+            st.plotly_chart(plotly_layout(fig, 380), width="stretch")
 
+            table = profiles[["cluster", "segment", "cluster_size", "action"]].copy()
+            table["part"] = table["cluster_size"] / table["cluster_size"].sum()
+            table = table.rename(
+                columns={
+                    "cluster": "Cluster",
+                    "segment": "Profil",
+                    "cluster_size": "Clients",
+                    "action": "Action prioritaire",
+                    "part": "Part",
+                }
+            )
+            table["Part"] = table["Part"].map(lambda x: f"{100 * x:.1f} %")
+            st.dataframe(table, width="stretch", hide_index=True)
+
+    st.subheader("Messages pour le décideur")
     i1, i2, i3 = st.columns(3)
     with i1:
         render_insight(
-            "Priorite fraude",
-            "Le taux de fraude est tres faible. Les decisions doivent donc s'appuyer sur le recall, la precision et la PR-AUC plutot que sur l'accuracy.",
+            "Priorité fraude",
+            "Classe très déséquilibrée (~0,11 %). Piloter par recall, précision et PR-AUC — pas par l'accuracy.",
         )
     with i2:
         render_insight(
             "Signal dominant",
-            "Les transactions TRANSFER et CASH_OUT concentrent le risque observe. Les incoherences de soldes sont des variables de controle essentielles.",
+            "Risque concentré sur TRANSFER et CASH_OUT. Les écarts de soldes sont le signal métier le plus robuste.",
         )
     with i3:
         render_insight(
             "Lecture marketing",
-            "Les 4 segments se lisent par niveau de valeur, canal d'achat et sensibilite aux campagnes. Le cluster 2 est le plus premium.",
+            "Quatre personas actionnables : dormants (50 %), fidèles stables (40 %), premium réactifs (8 %), promo digitaux (2 %).",
         )
 
 
 def show_fraud_results() -> None:
     render_header(
-        "Detection de fraude",
-        "Performance des modeles, seuil de decision, signaux explicatifs et simulateur transactionnel.",
+        "Détection de fraude",
+        "Performance des modèles, seuil de décision, signaux explicatifs et simulateur transactionnel.",
     )
 
     comparison = load_fraud_comparison()
     if comparison.empty:
-        st.warning("Lance `python -m src.models.train_fraud_model` pour generer les resultats.")
+        st.warning("Lancez `python -m src.models.train_fraud_model` pour générer les résultats.")
         return
 
     best_model = _best_fraud_name()
@@ -654,31 +1315,31 @@ def show_fraud_results() -> None:
     confusion = estimate_confusion_from_metrics(best_row)
 
     k1, k2, k3, k4, k5 = st.columns(5)
-    k1.metric("Modele retenu", best_model)
+    k1.metric("Modèle retenu", best_model)
     k2.metric("PR-AUC", f"{best_row.get('pr_auc', 0):.4f}")
-    k3.metric("Recall", _format_percent(float(best_row.get("recall", 0)), 2))
-    k4.metric("Precision", _format_percent(float(best_row.get("precision", 0)), 2))
+    k3.metric("Rappel", _format_percent(float(best_row.get("recall", 0)), 2))
+    k4.metric("Précision", _format_percent(float(best_row.get("precision", 0)), 2))
     k5.metric("Seuil retenu", f"{best_row.get('threshold', 0):.2f}")
 
-    tab_perf, tab_data, tab_threshold, tab_lab = st.tabs(
-        ["Performance", "Analyse donnees", "Seuil et alertes", "Simulateur"]
+    tab_perf, tab_data, tab_threshold, tab_lab, tab_shap = st.tabs(
+        ["Performance", "Analyse données", "Seuil et alertes", "Simulateur", "Explications SHAP"]
     )
 
     with tab_perf:
         left, right = st.columns([1.05, 0.95])
         with left:
             metrics = ["pr_auc", "roc_auc", "f1", "recall", "precision"]
-            long = comparison[metrics].reset_index().melt(id_vars="index", var_name="metrique", value_name="score")
+            long = comparison[metrics].reset_index().melt(id_vars="index", var_name="métrique", value_name="score")
             fig = px.bar(
                 long,
                 x="index",
                 y="score",
-                color="metrique",
+                color="métrique",
                 barmode="group",
                 color_discrete_sequence=px.colors.qualitative.Safe,
-                title="Comparaison des modeles de classification",
+                title="Comparaison des modèles de classification",
             )
-            fig.update_layout(xaxis_title="Modele", yaxis_title="Score")
+            fig.update_layout(xaxis_title="Modèle", yaxis_title="Score")
             st.plotly_chart(plotly_layout(fig, 420), width="stretch")
 
         with right:
@@ -695,7 +1356,7 @@ def show_fraud_results() -> None:
                 )
                 st.plotly_chart(plotly_layout(fig, 420), width="stretch")
             else:
-                st.info("Importance des variables indisponible pour ce modele.")
+                st.info("Importance des variables indisponible pour ce modèle.")
 
         st.dataframe(
             comparison.style.format(
@@ -725,7 +1386,7 @@ def show_fraud_results() -> None:
                     hole=0.48,
                     color="label",
                     color_discrete_map={"Fraude": "#c2415c", "Normal": "#157f7f"},
-                    title="Desequilibre des classes",
+                    title="Déséquilibre des classes",
                 )
                 st.plotly_chart(plotly_layout(fig, 330), width="stretch")
         with c_right:
@@ -740,24 +1401,24 @@ def show_fraud_results() -> None:
                     color_discrete_map={"Fraude": "#c2415c", "Normal": "#157f7f"},
                     title="Diagnostics de soldes et montants",
                 )
-                fig.update_layout(xaxis_title="", yaxis_title="Valeur moyenne ou mediane")
+                fig.update_layout(xaxis_title="", yaxis_title="Valeur moyenne ou médiane")
                 st.plotly_chart(plotly_layout(fig, 330), width="stretch")
 
         i1, i2, i3 = st.columns(3)
         with i1:
             render_insight(
                 "Classe rare",
-                "Le modele doit traiter une classe fraude tres minoritaire. C'est pour cela que l'accuracy n'est pas la metrique principale.",
+                "Le modèle doit traiter une classe fraude très minoritaire. C'est pour cela que l'accuracy n'est pas la métrique principale.",
             )
         with i2:
             render_insight(
                 "Soldes utiles",
-                "Les ecarts entre montant et variation de solde creent des signaux forts pour identifier des transactions incoherentes.",
+                "Les écarts entre montant et variation de solde créent des signaux forts pour identifier des transactions incohérentes.",
             )
         with i3:
             render_insight(
-                "Lecture operationnelle",
-                "Les alertes doivent etre calibrees par seuil : plus le seuil baisse, plus le rappel augmente mais plus il y a d'alertes.",
+                "Lecture opérationnelle",
+                "Les alertes doivent être calibrées par seuil : plus le seuil baisse, plus le rappel augmente mais plus il y a d'alertes.",
             )
 
         st.divider()
@@ -771,7 +1432,7 @@ def show_fraud_results() -> None:
                     y="frauds",
                     color="fraud_rate",
                     color_continuous_scale="Reds",
-                    title="Fraudes observees par type",
+                    title="Fraudes observées par type",
                     hover_data=["transactions", "avg_amount", "median_amount"],
                 )
                 st.plotly_chart(plotly_layout(fig, 390), width="stretch")
@@ -802,7 +1463,7 @@ def show_fraud_results() -> None:
                     x="step_bucket",
                     y="fraud_rate",
                     markers=True,
-                    title="Evolution du taux de fraude par fenetre temporelle",
+                    title="Évolution du taux de fraude par fenêtre temporelle",
                 )
                 fig.update_yaxes(tickformat=".2%")
                 st.plotly_chart(plotly_layout(fig, 300), width="stretch")
@@ -834,7 +1495,7 @@ def show_fraud_results() -> None:
         else:
             default_threshold = float(best_row.get("threshold", 0.5))
             threshold = st.slider(
-                "Seuil de decision",
+                "Seuil de décision",
                 min_value=0.05,
                 max_value=0.99,
                 value=min(max(default_threshold, 0.05), 0.99),
@@ -843,72 +1504,114 @@ def show_fraud_results() -> None:
             row = curve.iloc[(curve["threshold"] - threshold).abs().argsort()[:1]]
 
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Precision simulee", _format_percent(float(row["precision"].iloc[0]), 2))
-            c2.metric("Recall simule", _format_percent(float(row["recall"].iloc[0]), 2))
-            c3.metric("F1 simule", f"{float(row['f1'].iloc[0]):.4f}")
-            c4.metric("Alertes echantillon", f"{int(row['alerts'].iloc[0]):,}".replace(",", " "))
+            c1.metric("Précision simulée", _format_percent(float(row["precision"].iloc[0]), 2))
+            c2.metric("Rappel simulé", _format_percent(float(row["recall"].iloc[0]), 2))
+            c3.metric("F1 simulé", f"{float(row['f1'].iloc[0]):.4f}")
+            c4.metric("Alertes échantillon", f"{int(row['alerts'].iloc[0]):,}".replace(",", " "))
 
             fig = px.line(
                 curve,
                 x="threshold",
                 y=["precision", "recall", "f1"],
                 color_discrete_sequence=["#157f7f", "#c2415c", "#b7791f"],
-                title="Compromis precision / recall / F1 selon le seuil",
+                title="Compromis précision / recall / F1 selon le seuil",
             )
             fig.add_vline(x=threshold, line_dash="dash", line_color="#101828")
             st.plotly_chart(plotly_layout(fig, 430), width="stretch")
 
             col_a, col_b, col_c = st.columns(3)
-            col_a.metric("Fraudes test estimees", f"{confusion['positives']:.0f}")
-            col_b.metric("Fraudes detectees estimees", f"{confusion['tp']:.0f}")
-            col_c.metric("Fraudes manquees estimees", f"{confusion['fn']:.0f}")
+            col_a.metric("Fraudes test estimées", f"{confusion['positives']:.0f}")
+            col_b.metric("Fraudes détectées estimées", f"{confusion['tp']:.0f}")
+            col_c.metric("Fraudes manquées estimées", f"{confusion['fn']:.0f}")
 
     with tab_lab:
-        fraud_playground()
+        fraud_playground(form_key="fraud_sim")
+
+    with tab_shap:
+        render_fraud_shap_tab()
 
 
-def fraud_playground() -> None:
-    st.subheader("Evaluation d'une transaction")
+FRAUD_SIM_PRESETS = {
+    "normal": {
+        "label": "Transaction cohérente (faible risque)",
+        "step": 1,
+        "type": "TRANSFER",
+        "amount": 1000.0,
+        "old_org": 2000.0,
+        "new_org": 1000.0,
+        "old_dest": 500.0,
+        "new_dest": 1500.0,
+    },
+    "fraud": {
+        "label": "Fraude typique du jeu de données (risque élevé)",
+        "step": 1,
+        "type": "TRANSFER",
+        "amount": 181.0,
+        "old_org": 181.0,
+        "new_org": 0.0,
+        "old_dest": 0.0,
+        "new_dest": 0.0,
+    },
+}
+
+
+@st.fragment
+def fraud_playground(form_key: str = "fraud_sim") -> None:
+    st.subheader("Évaluation d'une transaction")
     model = load_fraud_model()
     if model is None:
-        st.error("Modele fraude introuvable.")
+        st.error("Modèle fraude introuvable. Lancez `python -m src.models.train_fraud_model`.")
         return
 
     comparison = load_fraud_comparison()
     best_model = _best_fraud_name()
     threshold = _metric_value(comparison, best_model, "threshold", 0.5)
+    preset_state_key = f"{form_key}_preset"
 
-    with st.form("fraud_form"):
+    if preset_state_key not in st.session_state:
+        st.session_state[preset_state_key] = "normal"
+
+    p1, p2, _ = st.columns([1, 1, 2])
+    if p1.button("Exemple faible risque", key=f"{form_key}_btn_normal"):
+        st.session_state[preset_state_key] = "normal"
+        st.session_state.pop(f"{form_key}_show_shap", None)
+        st.rerun()
+    if p2.button("Exemple fraude avérée", key=f"{form_key}_btn_fraud"):
+        st.session_state[preset_state_key] = "fraud"
+        st.session_state.pop(f"{form_key}_show_shap", None)
+        st.rerun()
+
+    preset = FRAUD_SIM_PRESETS[st.session_state[preset_state_key]]
+
+    with st.form(form_key):
         c1, c2, c3, c4 = st.columns(4)
-        step = c1.number_input("Step", min_value=1, value=1)
-        tx_type = c2.selectbox("Type", ["TRANSFER", "CASH_OUT", "PAYMENT", "CASH_IN", "DEBIT"])
-        amount = c3.number_input("Montant", min_value=0.0, value=1000.0, step=100.0)
-        old_org = c4.number_input("Solde emetteur avant", min_value=0.0, value=2000.0, step=100.0)
-        new_org = c1.number_input("Solde emetteur apres", min_value=0.0, value=1000.0, step=100.0)
-        old_dest = c2.number_input("Solde destinataire avant", min_value=0.0, value=500.0, step=100.0)
-        new_dest = c3.number_input("Solde destinataire apres", min_value=0.0, value=1500.0, step=100.0)
-        submitted = st.form_submit_button("Calculer le score")
+        step = c1.number_input("Step", min_value=1, value=int(preset["step"]))
+        tx_choices = ["TRANSFER", "CASH_OUT", "PAYMENT", "CASH_IN", "DEBIT"]
+        tx_type = c2.selectbox(
+            "Type",
+            tx_choices,
+            index=tx_choices.index(preset["type"]) if preset["type"] in tx_choices else 0,
+        )
+        amount = c3.number_input("Montant", min_value=0.0, value=float(preset["amount"]), step=100.0)
+        old_org = c4.number_input("Solde émetteur avant", min_value=0.0, value=float(preset["old_org"]), step=100.0)
+        new_org = c1.number_input("Solde émetteur après", min_value=0.0, value=float(preset["new_org"]), step=100.0)
+        old_dest = c2.number_input("Solde destinataire avant", min_value=0.0, value=float(preset["old_dest"]), step=100.0)
+        new_dest = c3.number_input("Solde destinataire après", min_value=0.0, value=float(preset["new_dest"]), step=100.0)
+        submitted = st.form_submit_button("Calculer le score", type="primary")
 
     if not submitted:
+        st.caption("Renseignez la transaction puis cliquez sur **Calculer le score**.")
         return
 
-    row = pd.DataFrame(
-        [
-            {
-                "step": step,
-                "type": tx_type,
-                "amount": amount,
-                "oldbalanceOrg": old_org,
-                "newbalanceOrig": new_org,
-                "oldbalanceDest": old_dest,
-                "newbalanceDest": new_dest,
-            }
-        ]
-    )
-    features = build_fraud_features(preprocess_fraud(row))
-    model_input = features.drop(columns=[c for c in ("nameOrig", "nameDest", "isFlaggedFraud") if c in features.columns])
-    model_input = _align_to_expected_columns(model_input, model)
-    proba = float(model.predict_proba(model_input)[0, 1])
+    try:
+        with st.spinner("Calcul du score…"):
+            proba, features = _predict_fraud_transaction(
+                model, int(step), tx_type, amount, old_org, new_org, old_dest, new_dest
+            )
+    except Exception as exc:
+        st.error(f"Erreur lors du scoring : {exc}")
+        return
+
     prediction = int(proba >= threshold)
     risk_label = "Alerte fraude" if prediction else "Surveillance" if proba >= threshold / 2 else "Risque faible"
 
@@ -929,7 +1632,7 @@ def fraud_playground() -> None:
                     ],
                     "threshold": {"line": {"color": "#101828", "width": 3}, "value": threshold},
                 },
-                title={"text": "Probabilite de fraude"},
+                title={"text": "Probabilité de fraude"},
             )
         )
         st.plotly_chart(plotly_layout(fig, 330), width="stretch")
@@ -939,29 +1642,39 @@ def fraud_playground() -> None:
         dest_error = float(features.get("dest_error", pd.Series([0.0])).iloc[0])
         ratio = float(features.get("amount_to_oldbalance_ratio", pd.Series([np.nan])).iloc[0])
         with st.container(border=True):
-            st.subheader("Decision")
+            st.subheader("Décision")
             if prediction:
                 st.error(risk_label)
             elif proba >= threshold / 2:
                 st.warning(risk_label)
             else:
                 st.success(risk_label)
-            st.metric("Seuil modele", f"{threshold:.2f}")
-            st.metric("Erreur solde emetteur", f"{origin_error:,.2f}")
+            st.metric("Seuil modèle", f"{threshold:.2f}")
+            st.metric("Erreur solde émetteur", f"{origin_error:,.2f}")
             st.metric("Erreur solde destinataire", f"{dest_error:,.2f}")
-            st.metric("Ratio montant / solde", f"{ratio:.3f}")
+            st.metric("Ratio montant / solde", f"{ratio:.3f}" if np.isfinite(ratio) else "—")
+
+    shap_flag = f"{form_key}_show_shap"
+    if st.button("Afficher les contributions SHAP", key=f"{form_key}_btn_shap"):
+        st.session_state[shap_flag] = True
+
+    if st.session_state.get(shap_flag):
+        with st.spinner("Calcul SHAP local…"):
+            _render_local_shap_block(
+                int(step), tx_type, amount, old_org, new_org, old_dest, new_dest, proba=proba
+            )
 
 
 def show_cluster_profiles() -> None:
     render_header(
         "Segmentation client",
-        "Comparaison des modeles, lecture des profils, projection PCA et simulateur segment.",
+        "Comparaison des modèles, lecture des profils, projection PCA et simulateur segment.",
     )
 
     profiles = load_cluster_profiles()
     comparison = load_cluster_comparison()
     if profiles.empty:
-        st.warning("Lance `python -m src.models.train_clustering_model` pour generer les profils.")
+        st.warning("Lancez `python -m src.models.train_clustering_model` pour générer les profils.")
         return
 
     total_clients = int(profiles["cluster_size"].sum())
@@ -970,13 +1683,13 @@ def show_cluster_profiles() -> None:
     best_silhouette = _metric_value(comparison, best_cluster, "silhouette")
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Clients segmentes", f"{total_clients:,}".replace(",", " "))
-    c2.metric("Modele retenu", best_cluster)
+    c1.metric("Clients segmentés", f"{total_clients:,}".replace(",", " "))
+    c2.metric("Modèle retenu", best_cluster)
     c3.metric("Silhouette", f"{best_silhouette:.4f}")
     c4.metric("Segment premium", f"Cluster {premium_cluster}")
 
     tab_exploration, tab_profiles, tab_projection, tab_models, tab_sim = st.tabs(
-        ["Exploration donnees", "Profils", "Carte PCA", "Comparaison modeles", "Simulateur"]
+        ["Exploration données", "Profils", "Carte PCA", "Comparaison des modèles", "Simulateur"]
     )
 
     with tab_exploration:
@@ -1013,13 +1726,13 @@ def show_cluster_profiles() -> None:
                         color="segment",
                         opacity=0.65,
                         color_discrete_sequence=px.colors.qualitative.Set2,
-                        title="Revenu vs depense totale",
+                        title="Revenu vs dépense totale",
                     )
                     st.plotly_chart(plotly_layout(fig, 500), width="stretch")
 
     with tab_models:
         if comparison.empty:
-            st.info("Comparaison des modeles indisponible.")
+            st.info("Comparaison des modèles indisponible.")
         else:
             cmp_df = comparison.sort_values("silhouette", ascending=False).copy()
             left, right = st.columns([1.05, 0.95])
@@ -1065,18 +1778,18 @@ def show_cluster_profiles() -> None:
 def show_customer_exploration() -> None:
     df = cluster_enriched_dataset()
     if df.empty:
-        st.info("Donnees client indisponibles.")
+        st.info("Données client indisponibles.")
         return
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Clients", f"{len(df):,}".replace(",", " "))
-    c2.metric("Revenu median", f"{df['Income'].median():,.0f}" if "Income" in df.columns else "N/A")
+    c2.metric("Revenu médian", f"{df['Income'].median():,.0f}" if "Income" in df.columns else "N/A")
     c3.metric(
-        "Depense mediane",
+        "Dépense médiane",
         f"{df['Total_Spending'].median():,.0f}" if "Total_Spending" in df.columns else "N/A",
     )
     c4.metric(
-        "Achats medians",
+        "Achats médians",
         f"{df['Total_Purchases'].median():.0f}" if "Total_Purchases" in df.columns else "N/A",
     )
 
@@ -1101,9 +1814,9 @@ def show_customer_exploration() -> None:
                 y="depense_moyenne",
                 color="depense_moyenne",
                 color_continuous_scale="Teal",
-                title="Depenses moyennes par categorie de produit",
+                title="Dépenses moyennes par catégorie de produit",
             )
-            fig.update_layout(xaxis_title="", yaxis_title="Depense moyenne")
+            fig.update_layout(xaxis_title="", yaxis_title="Dépense moyenne")
             st.plotly_chart(plotly_layout(fig, 360), width="stretch")
 
     with right:
@@ -1116,7 +1829,7 @@ def show_customer_exploration() -> None:
                 size="Total_Purchases" if "Total_Purchases" in df.columns else None,
                 opacity=0.68,
                 color_discrete_sequence=px.colors.qualitative.Set2,
-                title="Revenu vs depense totale",
+                title="Revenu vs dépense totale",
             )
             st.plotly_chart(plotly_layout(fig, 360), width="stretch")
 
@@ -1153,7 +1866,7 @@ def show_customer_exploration() -> None:
             color_continuous_scale="RdBu",
             zmin=-1,
             zmax=1,
-            title="Correlation des indicateurs clients",
+            title="Corrélation des indicateurs clients",
         )
         st.plotly_chart(plotly_layout(fig, 520), width="stretch")
 
@@ -1161,7 +1874,7 @@ def show_customer_exploration() -> None:
     with i1:
         render_insight(
             "Valeur client",
-            "Le couple revenu et depense totale permet de separer les clients faibles depenses des profils premium.",
+            "Le couple revenu et dépense totale permet de séparer les clients à faibles dépenses des profils premium.",
         )
     with i2:
         render_insight(
@@ -1170,8 +1883,8 @@ def show_customer_exploration() -> None:
         )
     with i3:
         render_insight(
-            "Interpretation",
-            "Le clustering doit etre juge par son utilite metier : un segment est bon s'il permet une action claire.",
+            "Interprétation",
+            "Le clustering doit être jugé par son utilité métier : un segment est bon s'il permet une action claire.",
         )
 
 
@@ -1209,7 +1922,7 @@ def segment_summary(profiles: pd.DataFrame) -> None:
         y=heat_cols,
         aspect="auto",
         color_continuous_scale="Tealrose",
-        title="Profil normalise des segments",
+        title="Profil normalisé des segments",
     )
     st.plotly_chart(plotly_layout(fig, 430), width="stretch")
 
@@ -1221,7 +1934,7 @@ def segment_summary(profiles: pd.DataFrame) -> None:
                 st.markdown(f"**Cluster {int(row['cluster'])} - {row['segment']}**")
                 st.write(f"Clients : {int(row['cluster_size'])}")
                 st.write(f"Revenu moyen : {row['Income']:,.0f}")
-                st.write(f"Depense moyenne : {row['Total_Spending']:,.0f}")
+                st.write(f"Dépense moyenne : {row['Total_Spending']:,.0f}")
                 st.write(f"Achats moyens : {row['Total_Purchases']:,.1f}")
                 st.info(row["action"])
 
@@ -1254,37 +1967,37 @@ def segment_summary(profiles: pd.DataFrame) -> None:
 
 
 def segment_playground() -> None:
-    st.subheader("Attribution d'un client a un segment")
+    st.subheader("Attribution d'un client à un segment")
     model = load_cluster_model()
     if model is None:
-        st.error("Modele clustering introuvable.")
+        st.error("Modèle clustering introuvable.")
         return
 
     with st.form("segment_form"):
         c1, c2, c3, c4 = st.columns(4)
-        year_birth = c1.number_input("Annee de naissance", min_value=1940, max_value=2010, value=1985)
+        year_birth = c1.number_input("Année de naissance", min_value=1940, max_value=2010, value=1985)
         education = c2.selectbox("Education", ["Graduation", "PhD", "Master", "2n Cycle", "Basic"])
         marital = c3.selectbox("Situation", ["Single", "Together", "Married", "Divorced", "Widow"])
         income = c4.number_input("Revenu", min_value=0.0, value=50000.0, step=1000.0)
 
         kidhome = c1.number_input("Enfants", min_value=0, max_value=5, value=0)
         teenhome = c2.number_input("Adolescents", min_value=0, max_value=5, value=0)
-        recency = c3.number_input("Recence", min_value=0, value=20)
+        recency = c3.number_input("Récence", min_value=0, value=20)
         web_visits = c4.number_input("Visites web mensuelles", min_value=0, value=6)
 
-        wines = c1.number_input("Depenses vins", min_value=0, value=200, step=20)
-        fruits = c2.number_input("Depenses fruits", min_value=0, value=20, step=10)
-        meat = c3.number_input("Depenses viande", min_value=0, value=120, step=20)
-        fish = c4.number_input("Depenses poisson", min_value=0, value=30, step=10)
-        sweet = c1.number_input("Depenses sucre", min_value=0, value=15, step=10)
-        gold = c2.number_input("Depenses premium", min_value=0, value=40, step=10)
+        wines = c1.number_input("Dépenses vins", min_value=0, value=200, step=20)
+        fruits = c2.number_input("Dépenses fruits", min_value=0, value=20, step=10)
+        meat = c3.number_input("Dépenses viande", min_value=0, value=120, step=20)
+        fish = c4.number_input("Dépenses poisson", min_value=0, value=30, step=10)
+        sweet = c1.number_input("Dépenses sucre", min_value=0, value=15, step=10)
+        gold = c2.number_input("Dépenses premium", min_value=0, value=40, step=10)
 
         deals = c1.number_input("Achats promo", min_value=0, value=2)
         web = c2.number_input("Achats web", min_value=0, value=5)
         catalog = c3.number_input("Achats catalogue", min_value=0, value=2)
         store = c4.number_input("Achats magasin", min_value=0, value=4)
-        accepted = c1.slider("Campagnes acceptees", min_value=0, max_value=5, value=1)
-        submitted = st.form_submit_button("Predire le segment")
+        accepted = c1.slider("Campagnes acceptées", min_value=0, max_value=5, value=1)
+        submitted = st.form_submit_button("Prédire le segment")
 
     if not submitted:
         return
@@ -1328,20 +2041,20 @@ def segment_playground() -> None:
     transformed = model.named_steps["preprocessor"].transform(prepared)
     cluster_model = model.named_steps["clustering"]
     label = int(cluster_model.predict(transformed)[0]) if hasattr(cluster_model, "predict") else 0
-    segment_name = SEGMENT_NAMES.get(label, "Segment non nomme")
-    action = SEGMENT_ACTIONS.get(label, "Analyse complementaire.")
+    segment_name = SEGMENT_NAMES.get(label, "Segment non nommé")
+    action = SEGMENT_ACTIONS.get(label, "Analyse complémentaire.")
 
     c1, c2, c3 = st.columns(3)
-    c1.metric("Segment predit", f"Cluster {label}")
+    c1.metric("Segment prédit", f"Cluster {label}")
     c2.metric("Persona", segment_name)
-    c3.metric("Depense totale saisie", f"{wines + fruits + meat + fish + sweet + gold:,.0f}")
-    render_insight("Action recommandee", action)
+    c3.metric("Dépense totale saisie", f"{wines + fruits + meat + fish + sweet + gold:,.0f}")
+    render_insight("Action recommandée", action)
 
 
 def show_prediction_center() -> None:
     render_header(
-        "Centre de prediction",
-        "Etat du scoring, tests unitaires de prediction et endpoints API disponibles.",
+        "Centre de prédiction",
+        "État du scoring, tests unitaires de prédiction et endpoints API disponibles.",
     )
 
     fraud_model = load_fraud_model()
@@ -1352,47 +2065,47 @@ def show_prediction_center() -> None:
     threshold = _metric_value(fraud_cmp, best_fraud, "threshold", 0.5)
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Prediction fraude", "operationnelle" if fraud_model is not None else "indisponible")
+    c1.metric("Prédiction fraude", "opérationnelle" if fraud_model is not None else "indisponible")
     c2.metric("Seuil fraude", f"{threshold:.2f}")
-    c3.metric("Prediction segment", "operationnelle" if cluster_model is not None else "indisponible")
-    c4.metric("Modele segment", best_cluster)
+    c3.metric("Prédiction segment", "opérationnelle" if cluster_model is not None else "indisponible")
+    c4.metric("Modèle segment", best_cluster)
 
     s1, s2, s3 = st.columns(3)
     with s1:
         render_insight(
             "Fraude",
-            f"Le modele {best_fraud} retourne une probabilite de fraude. La classe finale depend du seuil calibre sur validation.",
+            f"Le modèle {best_fraud} retourne une probabilité de fraude. La classe finale dépend du seuil calibré sur validation.",
         )
     with s2:
         render_insight(
             "Segmentation",
-            "Le modele de clustering attribue un client a un segment et associe ce segment a une action marketing.",
+            "Le modèle de clustering attribue un client à un segment et associe ce segment à une action marketing.",
         )
     with s3:
         render_insight(
             "Production",
-            "La prediction est disponible dans le dashboard et via l'API FastAPI. Le batch scoring reste une evolution possible.",
+            "La prédiction est disponible dans le dashboard et via l'API FastAPI. Le batch scoring reste une évolution possible.",
         )
 
     tab_fraud, tab_segment, tab_api = st.tabs(["Tester fraude", "Tester segment client", "API"])
 
     with tab_fraud:
-        st.info("Objectif : saisir les caracteristiques d'une transaction et obtenir un score de fraude.")
-        fraud_playground()
+        st.info("Objectif : saisir les caractéristiques d'une transaction et obtenir un score de fraude.")
+        fraud_playground(form_key="fraud_pred")
 
     with tab_segment:
         st.info("Objectif : saisir le profil d'un client et obtenir son segment marketing.")
         segment_playground()
 
     with tab_api:
-        st.subheader("Endpoints de prediction")
+        st.subheader("Endpoints de prédiction")
         endpoints = pd.DataFrame(
             [
-                ["GET", "/model/info", "Connaitre les modeles charges et le seuil fraude"],
-                ["POST", "/predict/fraud", "Predire la probabilite de fraude d'une transaction"],
-                ["POST", "/predict/segment", "Attribuer un segment a un profil client"],
+                ["GET", "/model/info", "Connaître les modèles chargés et le seuil fraude"],
+                ["POST", "/predict/fraud", "Prédire la probabilité de fraude d'une transaction"],
+                ["POST", "/predict/segment", "Attribuer un segment à un profil client"],
             ],
-            columns=["Methode", "Endpoint", "Role"],
+            columns=["Méthode", "Endpoint", "Rôle"],
         )
         st.dataframe(endpoints, width="stretch", hide_index=True)
 
@@ -1458,8 +2171,8 @@ def show_prediction_center() -> None:
 
 def show_recommendations() -> None:
     render_header(
-        "Recommandations metier",
-        "Synthese des decisions a prendre pour la fraude, le marketing et l'industrialisation.",
+        "Recommandations métier",
+        "Synthèse des décisions à prendre pour la fraude, le marketing et l'industrialisation.",
     )
 
     col1, col2 = st.columns(2)
@@ -1467,11 +2180,11 @@ def show_recommendations() -> None:
         st.subheader("Fraude")
         fraud_matrix = pd.DataFrame(
             [
-                ["Score >= seuil", "Alerte prioritaire", "Verification forte ou blocage temporaire"],
-                ["Score intermediaire", "Surveillance", "Revue humaine selon capacite"],
+                ["Score >= seuil", "Alerte prioritaire", "Vérification forte ou blocage temporaire"],
+                ["Score intermédiaire", "Surveillance", "Revue humaine selon capacité"],
                 ["Score faible", "Traitement standard", "Monitoring statistique"],
             ],
-            columns=["Situation", "Decision", "Action"],
+            columns=["Situation", "Décision", "Action"],
         )
         st.dataframe(fraud_matrix, width="stretch", hide_index=True)
     with col2:
@@ -1484,29 +2197,91 @@ def show_recommendations() -> None:
                 hide_index=True,
             )
 
-    st.subheader("Priorites de la prochaine iteration")
+    st.subheader("Priorités de la prochaine itération")
     p1, p2, p3 = st.columns(3)
     with p1:
-        render_insight("Interpretabilite", "Ajouter SHAP pour expliquer les alertes fraude et les variables les plus decisives.")
+        render_insight(
+            "Interprétabilité",
+            "L'onglet Fraude > Explications SHAP détaille les contributions globales et par transaction.",
+        )
     with p2:
-        render_insight("Monitoring", "Suivre la derive des montants, types de transaction, scores et tailles de segments.")
+        render_insight("Monitoring", "Suivre la dérive des montants, types de transaction, scores et tailles de segments.")
     with p3:
-        render_insight("Industrialisation", "Ajouter MLflow, Docker, validation de schema et CI/CD pour rendre le projet reproductible.")
+        render_insight("Industrialisation", "Ajouter MLflow, Docker, validation de schéma et CI/CD pour rendre le projet reproductible.")
+
+
+def show_technical_report() -> None:
+    render_header(
+        "Rapport d'analyse et d'interprétation",
+        "Lecture des données, signification des modèles, personas clients et recommandations stratégiques.",
+    )
+
+    content = load_technical_report()
+    pdf_bytes = load_report_pdf()
+    pptx_bytes = load_presentation_pptx()
+
+    if not content and not pdf_bytes:
+        st.warning(
+            "Les fichiers du rapport sont introuvables. "
+            "Vérifiez que `reports/rapport_technique.md` et `reports/rapport_technique.pdf` "
+            "sont présents dans le dépôt."
+        )
+        return
+
+    st.subheader("Téléchargements")
+    dl1, dl2 = st.columns(2)
+
+    with dl1:
+        if pdf_bytes:
+            st.download_button(
+                label="Rapport (PDF)",
+                data=pdf_bytes,
+                file_name="rapport_technique.pdf",
+                mime="application/pdf",
+                width="stretch",
+                help="Version imprimable du rapport d'analyse.",
+            )
+        else:
+            st.caption("PDF non disponible sur ce déploiement.")
+
+    with dl2:
+        if pptx_bytes:
+            st.download_button(
+                label="Présentation (PPTX)",
+                data=pptx_bytes,
+                file_name="presentation_finale.pptx",
+                mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                width="stretch",
+                help="Slides pour la soutenance (12 diapositives).",
+            )
+        else:
+            st.caption("PPTX non disponible sur ce déploiement.")
+
+    if content:
+        st.caption(
+            f"Aperçu en ligne — source : `{REPORT_PATH.relative_to(PROJECT_ROOT).as_posix()}`"
+        )
+        with st.container(border=True):
+            render_report_markdown(content)
+    elif pdf_bytes:
+        st.info(
+            "L'aperçu markdown n'est pas disponible. Téléchargez le PDF pour consulter le rapport complet."
+        )
 
 
 def show_mlops() -> None:
     render_header(
         "MLOps et industrialisation",
-        "Etat des artefacts, architecture cible et controles de robustesse du projet.",
+        "État des artefacts, architecture cible et contrôles de robustesse du projet.",
     )
 
     fraud_model = load_fraud_model()
     cluster_model = load_cluster_model()
-    tests = "6 tests passes"
+    tests = "6 tests passés"
 
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Modele fraude", "charge" if fraud_model is not None else "absent")
-    c2.metric("Modele clustering", "charge" if cluster_model is not None else "absent")
+    c1.metric("Modèle fraude", "chargé" if fraud_model is not None else "absent")
+    c2.metric("Modèle clustering", "chargé" if cluster_model is not None else "absent")
     c3.metric("Tests", tests)
     c4.metric("API", "FastAPI")
 
@@ -1514,15 +2289,15 @@ def show_mlops() -> None:
     pipeline = pd.DataFrame(
         [
             ["1", "Ingestion", "Chargement des CSV bruts"],
-            ["2", "Validation", "Verification schema, types, valeurs manquantes"],
+            ["2", "Validation", "Vérification schéma, types, valeurs manquantes"],
             ["3", "Preprocessing", "Nettoyage, imputation, encodage"],
-            ["4", "Features", "Soldes, ratios, depenses, canaux"],
-            ["5", "Training", "Comparaison modeles et calibration seuil"],
-            ["6", "Evaluation", "PR-AUC, recall, precision, silhouette"],
+            ["4", "Features", "Soldes, ratios, dépenses, canaux"],
+            ["5", "Training", "Comparaison des modèles et calibration seuil"],
+            ["6", "Évaluation", "PR-AUC, recall, precision, silhouette"],
             ["7", "Serving", "API FastAPI et dashboard Streamlit"],
-            ["8", "Monitoring", "Drift, performance, stabilite segments"],
+            ["8", "Monitoring", "Drift, performance, stabilité segments"],
         ],
-        columns=["Etape", "Bloc", "Role"],
+        columns=["Étape", "Bloc", "Rôle"],
     )
     st.dataframe(pipeline, width="stretch", hide_index=True)
 
@@ -1541,7 +2316,7 @@ def show_mlops() -> None:
             artifact_rows.append(
                 {
                     "artefact": path.relative_to(PROJECT_ROOT).as_posix(),
-                    "statut": "present" if path.exists() else "absent",
+                    "statut": "présent" if path.exists() else "absent",
                     "taille_kb": round(path.stat().st_size / 1024, 1) if path.exists() else 0,
                 }
             )
@@ -1551,21 +2326,21 @@ def show_mlops() -> None:
         st.subheader("Endpoints API")
         endpoints = pd.DataFrame(
             [
-                ["GET", "/health", "Sante API"],
-                ["GET", "/model/info", "Modeles charges"],
+                ["GET", "/health", "Santé API"],
+                ["GET", "/model/info", "Modèles chargés"],
                 ["POST", "/predict/fraud", "Score fraude"],
                 ["POST", "/predict/segment", "Segment client"],
             ],
-            columns=["Methode", "Endpoint", "Usage"],
+            columns=["Méthode", "Endpoint", "Usage"],
         )
         st.dataframe(endpoints, width="stretch", hide_index=True)
 
     st.subheader("Roadmap technique")
     roadmap = pd.DataFrame(
         [
-            ["Court terme", "SHAP, figures rapport, validation metier des clusters"],
+            ["Court terme", "SHAP, figures rapport, validation métier des clusters"],
             ["Moyen terme", "MLflow, DVC/Git LFS, Docker, GitHub Actions"],
-            ["Long terme", "Monitoring drift, reentrainement programme, registre modele"],
+            ["Long terme", "Monitoring drift, réentraînement programmé, registre modèle"],
         ],
         columns=["Horizon", "Actions"],
     )
@@ -1587,5 +2362,7 @@ elif selected_page == "recommendations":
     show_recommendations()
 elif selected_page == "prediction":
     show_prediction_center()
+elif selected_page == "report":
+    show_technical_report()
 else:
     show_mlops()
