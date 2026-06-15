@@ -2,7 +2,10 @@
 
 **Data Science · Détection de fraude · Segmentation client · MLOps**
 
-Projet académique visant à construire une démarche complète de Machine Learning autour de deux cas d'usage complémentaires : la **détection automatique de transactions frauduleuses** (classification supervisée) et la **segmentation intelligente de clients** (clustering), avec une couche d'**industrialisation** (API, dashboard, tests).
+Projet académique visant à construire une démarche complète de Machine Learning autour de deux cas d'usage complémentaires : la **détection automatique de transactions frauduleuses** (classification supervisée) et la **segmentation intelligente de clients** (clustering), avec une couche d'**industrialisation** (API, dashboard, Docker, CI).
+
+**Auteur :** Kokou Godwin TCHAKPANA — M2 CDSD  
+**Livrables clés :** [rapport PDF](reports/rapport_technique.pdf) · [présentation PPTX](reports/presentation_finale.pptx)
 
 ## Demo en ligne
 
@@ -91,7 +94,7 @@ Dans un contexte bancaire et marketing, l'entreprise souhaite :
 | Composant | Technologie |
 |-----------|-------------|
 | Langage | Python 3.10+ |
-| ML | scikit-learn, XGBoost, imbalanced-learn |
+| ML | scikit-learn, XGBoost, LightGBM, SHAP |
 | API | FastAPI + Uvicorn |
 | Dashboard | Streamlit + Plotly |
 | Notebooks | Jupyter |
@@ -172,7 +175,12 @@ Requête JSON
 ├── Dockerfile
 ├── docker-compose.yml
 ├── .github/workflows/ci.yml
-├── docs/MONITORING.md
+├── docs/
+│   ├── MONITORING.md
+│   └── CAMPAGNE_CLUSTER1.md           # Protocole A/B cluster promo
+├── scripts/
+│   ├── check_ml_health.py
+│   └── generate_deliverables.py       # PDF + PPTX
 ├── data/
 │   ├── raw/                           # Données brutes (CSV)
 │   ├── processed/                     # Données transformées (optionnel)
@@ -191,8 +199,10 @@ Requête JSON
 │   ├── models/
 │   │   ├── train_fraud_model.py
 │   │   ├── train_clustering_model.py
+│   │   ├── fraud_experiments.py       # Temporel, erreurs, coûts FP/FN
 │   │   └── evaluate.py
 │   ├── visualization/
+│   │   ├── generate_report_figures.py
 │   │   └── plots.py
 │   └── api/
 │       └── main.py
@@ -204,7 +214,8 @@ Requête JSON
 ├── reports/
 │   ├── figures/
 │   ├── presentation_outline.md
-│   └── rapport_technique.md           # (à compléter)
+│   ├── presentation_finale.pptx
+│   └── rapport_technique.md           # Rapport d'analyse (+ .pdf)
 └── tests/
     ├── conftest.py
     ├── test_preprocessing.py
@@ -241,7 +252,7 @@ Requête JSON
 
 **Observations clés (EDA)** : 24 valeurs manquantes sur `Income` ; colonnes constantes `Z_CostContact`, `Z_Revenue` (exclues).
 
-> **Note** : les fichiers CSV volumineux (~78 Mo) peuvent être exclus du dépôt Git. Utiliser Git LFS, DVC ou un lien de téléchargement documenté si nécessaire.
+> **Note** : les fichiers CSV volumineux (~78 Mo) peuvent être versionnés via **Git LFS** — voir [`data/README.md`](data/README.md) pour les instructions.
 
 ---
 
@@ -252,17 +263,18 @@ Requête JSON
 1. Nettoyage (`preprocess_fraud`)
 2. Feature engineering : écarts de soldes, ratios, flags (`is_transfer_or_cashout`, …)
 3. Split stratifié train / validation / test (70 % / 15 % / 15 %)
-4. Entraînement comparatif (LogReg, RF, XGBoost)
+4. Entraînement comparatif (LogReg, RF, XGBoost, LightGBM, MLP)
 5. Calibration du seuil sur validation (rappel minimal ≥ 75 %)
-6. Évaluation sur test final
-7. Export : `fraud_model.joblib`, comparaisons JSON/CSV
+6. Évaluation sur test final + validation temporelle (`step`)
+7. Analyses complémentaires : erreurs FP/FN, chiffrage coûts, SHAP
+8. Export : `fraud_model.joblib`, comparaisons JSON/CSV
 
 ### Segmentation
 
 1. Imputation `Income`, exclusion colonnes constantes
 2. Features métier : `Age`, `Total_Spending`, `Total_Purchases`, ratios canaux, …
 3. Encodage + normalisation
-4. Comparaison KMeans / Agglomerative / GMM (k = 3–6)
+4. Comparaison KMeans / Agglomerative / GMM / DBSCAN (k = 3–6)
 5. Sélection du meilleur compromis (silhouette, Davies-Bouldin)
 6. Profilage métier par cluster
 7. Export : `cluster_model.joblib`, `cluster_profiles.csv`
@@ -280,9 +292,13 @@ Requête JSON
 | Precision | 1,0000 |
 | F1 | 0,9912 |
 | Seuil calibré | 0,67 |
-| Lignes d'entraînement | ~734 000 |
+| Lignes d'entraînement | ~734 000 (MLP : 200 000) |
+| Erreurs test (seuil retenu) | 3 FN / 0 FP |
 
-Comparaison complète : `models/fraud/fraud_model_comparison.csv`
+> LightGBM testé mais non retenu (PR-AUC ~0,18 — probabilités mal calibrées sur classe rare).
+
+Comparaison complète : `models/fraud/fraud_model_comparison.csv`  
+Rapport détaillé : [`reports/rapport_technique.md`](reports/rapport_technique.md) · [PDF](reports/rapport_technique.pdf)
 
 ### Segmentation — modèle retenu : **GMM k=4**
 
@@ -416,10 +432,13 @@ URL locale : `http://localhost:8501`
 
 | Page | Contenu |
 |------|---------|
-| **Vue d'ensemble** | KPIs modèles retenus |
-| **Résultats fraude** | Comparaison modèles, simulateur de seuil, playground prédiction |
-| **Analyse clusters** | Comparaison algorithmes, heatmap profils, PCA 2D, playground segment |
-| **Recommandations** | Actions marketing par profil |
+| **Vue d'ensemble** | KPIs, graphiques EDA, répartition segments |
+| **Fraude** | Comparaison modèles, seuil, analyses avancées (coûts, erreurs, temporel), SHAP, simulateur |
+| **Segmentation** | Comparaison algorithmes, heatmap profils, PCA 2D, simulateur |
+| **Recommandations** | Actions métier fraude et marketing par segment |
+| **Prédiction** | Scoring transaction / client + exemples API |
+| **MLOps** | Artefacts, pipeline, Docker/CI, roadmap |
+| **Rapport d'analyse** | Aperçu markdown, téléchargement PDF et PPTX |
 
 ---
 
@@ -528,6 +547,7 @@ Tests interactifs : ouvrir le dashboard Streamlit ou la documentation Swagger.
 | Rapport d'analyse (MD + PDF) | `reports/rapport_technique.md`, `.pdf` | ✅ |
 | Présentation finale | `reports/presentation_finale.pptx` | ✅ |
 | Plan de présentation | `reports/presentation_outline.md` | ✅ |
+| Protocole campagne cluster 1 | `docs/CAMPAGNE_CLUSTER1.md` | ✅ |
 
 ### Regénérer PDF et PPTX
 
@@ -552,10 +572,3 @@ python scripts/generate_deliverables.py
 - Optimisation d'hyperparamètres (Optuna)
 - Segmentation RFM complémentaire
 - MLflow + Evidently AI (drift automatisé)
-
----
-
-## Auteurs
-
-**Kokou Godwin TCHAKPANA** — M2 CDSD  
-Projet Machine Learning : détection de fraude et segmentation client
