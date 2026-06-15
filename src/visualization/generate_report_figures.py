@@ -160,6 +160,67 @@ def plot_fraud_feature_importance() -> None:
     _savefig("04_fraud_feature_importance.png")
 
 
+def plot_fraud_shap_summary(sample_size: int = 4000) -> None:
+    """Resume SHAP global sur un echantillon stratifie (modeles a arbres)."""
+    try:
+        import shap
+    except Exception:
+        return
+
+    from sklearn.model_selection import train_test_split
+
+    from src.models.train_fraud_model import _prepare_fraud_dataset
+
+    model = joblib.load(PROJECT_ROOT / "models" / "fraud" / "fraud_model.joblib")
+    classifier = model.named_steps["classifier"]
+    if not hasattr(classifier, "feature_importances_"):
+        return
+
+    X, y = _prepare_fraud_dataset()
+    if len(X) <= sample_size:
+        X_sample = X
+    else:
+        X_sample, _, _, _ = train_test_split(
+            X, y, train_size=sample_size, random_state=42, stratify=y
+        )
+
+    X_t = model.named_steps["preprocessor"].transform(X_sample)
+    try:
+        names = model.named_steps["preprocessor"].get_feature_names_out()
+    except Exception:
+        names = [f"feature_{i}" for i in range(X_t.shape[1])]
+
+    clean_names = [
+        str(n)
+        .replace("num__", "")
+        .replace("cat__", "")
+        .replace("type_", "type=")
+        for n in names
+    ]
+
+    try:
+        explainer = shap.TreeExplainer(classifier)
+        shap_values = explainer.shap_values(X_t)
+    except Exception:
+        return
+
+    if isinstance(shap_values, list):
+        sv = np.asarray(shap_values[1])
+    else:
+        sv = np.asarray(shap_values)
+
+    summary = pd.DataFrame(
+        {"feature": clean_names, "mean_abs_shap": np.abs(sv).mean(axis=0)}
+    ).sort_values("mean_abs_shap", ascending=False).head(12).sort_values("mean_abs_shap")
+
+    fig, ax = plt.subplots(figsize=(9.2, 5.6))
+    ax.barh(summary["feature"], summary["mean_abs_shap"], color=ROSE)
+    ax.set_title("Importance SHAP moyenne (classe fraude)", fontsize=14, fontweight="bold", color=INK)
+    ax.set_xlabel("|SHAP| moyen")
+    _clean_axes(ax)
+    _savefig("09_fraud_shap_summary.png")
+
+
 def _cluster_data() -> tuple[np.ndarray, np.ndarray, pd.DataFrame]:
     raw = pd.read_csv(PROJECT_ROOT / "data" / "raw" / "data_cluster.csv", sep=";")
     model = joblib.load(PROJECT_ROOT / "models" / "clustering" / "cluster_model.joblib")
@@ -172,6 +233,132 @@ def _cluster_data() -> tuple[np.ndarray, np.ndarray, pd.DataFrame]:
     transformed = model.named_steps["preprocessor"].transform(model_input)
     labels = model.named_steps["clustering"].predict(transformed)
     return transformed, labels, prepared
+
+
+def plot_fraud_temporal_comparison() -> None:
+    random_metrics = pd.read_csv(PROJECT_ROOT / "models" / "fraud" / "fraud_model_comparison.csv", index_col=0)
+    best = json.loads((PROJECT_ROOT / "models" / "fraud" / "fraud_best_model.json").read_text())["best_model"]
+    temporal_path = PROJECT_ROOT / "models" / "fraud" / "fraud_temporal_metrics.json"
+    if not temporal_path.exists():
+        return
+
+    temporal = json.loads(temporal_path.read_text(encoding="utf-8"))
+    random_row = random_metrics.loc[best]
+    metrics = ["pr_auc", "recall", "precision", "f1"]
+    random_vals = [random_row[m] for m in metrics]
+    temporal_vals = [temporal[m] for m in metrics]
+
+    fig, ax = plt.subplots(figsize=(8.8, 4.8))
+    x = np.arange(len(metrics))
+    width = 0.35
+    ax.bar(x - width / 2, random_vals, width=width, label="Split aleatoire", color=TEAL)
+    ax.bar(x + width / 2, temporal_vals, width=width, label="Split temporel (step)", color=ROSE)
+    ax.set_xticks(x, labels=[m.upper() for m in metrics])
+    ax.set_ylim(0, 1.08)
+    ax.set_title("Fraude : split aleatoire vs validation temporelle", fontsize=14, fontweight="bold", color=INK)
+    ax.legend()
+    _clean_axes(ax)
+    _savefig("07_fraud_temporal_comparison.png")
+
+
+def plot_fraud_error_summary() -> None:
+    error_path = PROJECT_ROOT / "models" / "fraud" / "fraud_error_analysis.json"
+    if not error_path.exists():
+        return
+
+    summary = json.loads(error_path.read_text(encoding="utf-8"))
+    labels = ["Faux negatifs", "Faux positifs"]
+    values = [summary["false_negatives"], summary["false_positives"]]
+    colors = [ROSE, AMBER]
+
+    fig, ax = plt.subplots(figsize=(6.8, 4.8))
+    bars = ax.bar(labels, values, color=colors)
+    ax.set_title("Erreurs sur le jeu de test (seuil retenu)", fontsize=14, fontweight="bold", color=INK)
+    ax.set_ylabel("Nombre de transactions")
+    for bar, value in zip(bars, values):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height(), str(value), ha="center", va="bottom")
+    _clean_axes(ax)
+    _savefig("08_fraud_error_summary.png")
+
+
+def plot_fraud_cost_scenarios() -> None:
+    cost_path = PROJECT_ROOT / "models" / "fraud" / "fraud_cost_analysis.json"
+    if not cost_path.exists():
+        return
+
+    data = json.loads(cost_path.read_text(encoding="utf-8"))
+    scenarios = data.get("scenarios", [])
+    if not scenarios:
+        return
+
+    labels = [f"{s['threshold']:.2f}" for s in scenarios]
+    fn_loss = [s["fn_financial_loss_units"] / 1e6 for s in scenarios]
+    fp_cost = [s["fp_operational_cost_eur"] / 1e3 for s in scenarios]
+    selected = [s.get("is_selected_threshold", False) for s in scenarios]
+    colors_fn = [TEAL if sel else "#94a3b8" for sel in selected]
+
+    fig, ax = plt.subplots(figsize=(8.2, 4.8))
+    x = np.arange(len(labels))
+    ax.bar(x, fn_loss, color=colors_fn, label="Perte FN (M unités)")
+    ax.bar(x, fp_cost, bottom=fn_loss, color=AMBER, alpha=0.85, label="Coût FP (k €)")
+    ax.set_xticks(x, labels=[f"Seuil {label}" for label in labels])
+    ax.set_ylabel("Coût (échelle mixte)")
+    ax.set_title("Compromis economique FP/FN par seuil", fontsize=14, fontweight="bold", color=INK)
+    for i, (fn, fp, sel) in enumerate(zip(fn_loss, fp_cost, selected)):
+        if sel:
+            ax.text(i, fn + fp + 0.05, "retenu", ha="center", fontsize=9, color=ROSE, fontweight="bold")
+    ax.legend()
+    _clean_axes(ax)
+    _savefig("10_fraud_cost_scenarios.png")
+
+
+def plot_clustering_elbow() -> None:
+    elbow_path = PROJECT_ROOT / "models" / "clustering" / "clustering_elbow.csv"
+    if not elbow_path.exists():
+        return
+
+    elbow = pd.read_csv(elbow_path)
+    fig, ax = plt.subplots(figsize=(8.2, 4.8))
+    ax.plot(elbow["k"], elbow["inertia"], marker="o", color=TEAL, linewidth=2)
+    ax.axvline(4, color=ROSE, linestyle="--", linewidth=1.2, label="k retenu = 4")
+    ax.set_title("Elbow Method - K-Means (inertie vs k)", fontsize=14, fontweight="bold", color=INK)
+    ax.set_xlabel("Nombre de clusters (k)")
+    ax.set_ylabel("Inertie")
+    ax.legend()
+    _clean_axes(ax)
+    _savefig("07_clustering_elbow.png")
+
+
+def plot_dbscan_comparison() -> None:
+    dbscan_path = PROJECT_ROOT / "models" / "clustering" / "clustering_dbscan_comparison.csv"
+    main_path = PROJECT_ROOT / "models" / "clustering" / "clustering_model_comparison.csv"
+    if not dbscan_path.exists() or not main_path.exists():
+        return
+
+    dbscan = pd.read_csv(dbscan_path, index_col=0)
+    if "status" in dbscan.columns:
+        dbscan = dbscan[dbscan["status"] == "evaluated"]
+    if dbscan.empty:
+        return
+
+    best_dbscan = dbscan.sort_values("silhouette", ascending=False).head(1).iloc[0]
+    main = pd.read_csv(main_path, index_col=0)
+    gmm = main.loc["gmm_k4"] if "gmm_k4" in main.index else main.sort_values("silhouette", ascending=False).iloc[0]
+
+    labels = ["DBSCAN (meilleur)", "GMM k=4 (retenu)"]
+    silhouettes = [best_dbscan["silhouette"], gmm["silhouette"]]
+    noise = [best_dbscan.get("noise_ratio", 0) * 100, 0]
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4.5))
+    axes[0].bar(labels, silhouettes, color=[AMBER, TEAL])
+    axes[0].set_ylim(0, max(silhouettes) * 1.2 + 0.05)
+    axes[0].set_title("Silhouette : DBSCAN vs modele retenu", fontweight="bold", color=INK)
+    axes[0].set_ylabel("Silhouette")
+
+    axes[1].bar(labels, noise, color=[AMBER, TEAL])
+    axes[1].set_title("Part de bruit (%)", fontweight="bold", color=INK)
+    axes[1].set_ylabel("Bruit (%)")
+    _savefig("08_clustering_dbscan_comparison.png")
 
 
 def plot_cluster_pca() -> None:
@@ -226,7 +413,13 @@ def main() -> None:
     plot_fraud_model_comparison()
     plot_fraud_confusion_matrix()
     plot_fraud_feature_importance()
+    plot_fraud_shap_summary()
+    plot_fraud_temporal_comparison()
+    plot_fraud_error_summary()
+    plot_fraud_cost_scenarios()
     plot_cluster_pca()
+    plot_clustering_elbow()
+    plot_dbscan_comparison()
     plot_cluster_heatmap()
 
 

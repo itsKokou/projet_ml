@@ -18,6 +18,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.neural_network import MLPClassifier
 
 from src.data.load_data import load_fraud_data
 from src.data.preprocessing import preprocess_fraud
@@ -30,6 +31,16 @@ try:
     HAS_XGBOOST = True
 except Exception:
     HAS_XGBOOST = False
+
+try:
+    from lightgbm import LGBMClassifier
+
+    HAS_LIGHTGBM = True
+except Exception:
+    HAS_LIGHTGBM = False
+
+DEFAULT_MAX_TRAIN_ROWS = None  # None = utilise tout le jeu d'entraînement (~734k lignes)
+MLP_MAX_TRAIN_ROWS = 200_000  # MLP : sous-echantillon documente (cout calcul eleve)
 
 
 def _best_threshold_from_validation(y_true, y_proba, min_recall: float = 0.75) -> float:
@@ -94,7 +105,7 @@ def _build_preprocessor(X: pd.DataFrame) -> ColumnTransformer:
                 Pipeline(
                     steps=[
                         ("imputer", SimpleImputer(strategy="most_frequent")),
-                        ("encoder", OneHotEncoder(handle_unknown="ignore")),
+                        ("encoder", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
                     ]
                 ),
                 categorical_cols,
@@ -104,10 +115,10 @@ def _build_preprocessor(X: pd.DataFrame) -> ColumnTransformer:
 
 
 def _stratified_sample(
-    X: pd.DataFrame, y: pd.Series, max_rows: int, random_state: int = 42
+    X: pd.DataFrame, y: pd.Series, max_rows: int | None = None, random_state: int = 42
 ) -> Tuple[pd.DataFrame, pd.Series]:
     """Sous-echantillonne de facon stratifiee pour limiter le cout de calcul."""
-    if len(X) <= max_rows:
+    if max_rows is None or len(X) <= max_rows:
         return X, y
 
     _, X_small, _, y_small = train_test_split(
@@ -155,7 +166,7 @@ def train_and_compare_fraud_models(
         FraudRunConfig(
             name="logistic_regression",
             estimator_builder=lambda _: LogisticRegression(max_iter=1000, class_weight="balanced"),
-            max_train_rows=None,
+            max_train_rows=DEFAULT_MAX_TRAIN_ROWS,
         ),
         FraudRunConfig(
             name="random_forest",
@@ -165,7 +176,7 @@ def train_and_compare_fraud_models(
                 random_state=42,
                 n_jobs=-1,
             ),
-            max_train_rows=350_000,
+            max_train_rows=DEFAULT_MAX_TRAIN_ROWS,
         ),
     ]
 
@@ -187,9 +198,46 @@ def train_and_compare_fraud_models(
                         int((y_local == 0).sum()) / max(int((y_local == 1).sum()), 1), 1.0
                     ),
                 ),
-                max_train_rows=450_000,
+                max_train_rows=DEFAULT_MAX_TRAIN_ROWS,
             )
         )
+
+    if HAS_LIGHTGBM:
+        configs.append(
+            FraudRunConfig(
+                name="lightgbm",
+                estimator_builder=lambda y_local: LGBMClassifier(
+                    n_estimators=400,
+                    max_depth=6,
+                    learning_rate=0.08,
+                    subsample=0.9,
+                    colsample_bytree=0.9,
+                    objective="binary",
+                    random_state=42,
+                    n_jobs=-1,
+                    verbose=-1,
+                    scale_pos_weight=max(
+                        int((y_local == 0).sum()) / max(int((y_local == 1).sum()), 1), 1.0
+                    ),
+                ),
+                max_train_rows=DEFAULT_MAX_TRAIN_ROWS,
+            )
+        )
+
+    configs.append(
+        FraudRunConfig(
+            name="mlp",
+            estimator_builder=lambda _: MLPClassifier(
+                hidden_layer_sizes=(64, 32),
+                activation="relu",
+                max_iter=30,
+                early_stopping=True,
+                validation_fraction=0.1,
+                random_state=42,
+            ),
+            max_train_rows=MLP_MAX_TRAIN_ROWS,
+        )
+    )
 
     all_metrics: Dict[str, Dict[str, float]] = {}
     best_model_name = None
@@ -253,5 +301,23 @@ def train_and_compare_fraud_models(
 
 
 if __name__ == "__main__":
+    from src.models.fraud_experiments import (
+        evaluate_temporal_split,
+        export_cost_analysis,
+        export_error_analysis,
+        export_models_scope,
+    )
+
     results = train_and_compare_fraud_models()
+    temporal = evaluate_temporal_split()
+    errors = export_error_analysis()
+    costs = export_cost_analysis()
+    scope = export_models_scope()
     print("Fraud model comparison:", results)
+    print("Temporal validation:", temporal)
+    print(
+        "Error analysis:",
+        {k: v for k, v in errors.items() if not k.endswith("_cases")},
+    )
+    print("Cost analysis:", costs.get("scenarios"))
+    print("Models scope:", scope)

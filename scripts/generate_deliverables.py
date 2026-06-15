@@ -140,19 +140,21 @@ def generate_pptx() -> Path:
         ], None),
         ("content", "Pipeline ML fraude", "Feature engineering + seuil calibré sur validation.", [
             "Features soldes : origin_error, dest_error, ratios",
-            "Split stratifie train/validation/test",
+            "Split stratifie + validation temporelle (step)",
+            "5 modeles : LogReg, RF, XGBoost, LightGBM, MLP",
             "Seuil calibré avec contrainte de rappel minimal",
         ], None),
-        ("content", "Resultats fraude", "XGBoost retenu : meilleure PR-AUC (0,991).", [
+        ("content", "Resultats fraude", "XGBoost retenu : meilleure PR-AUC (0,990).", [
             "Logistic Regression : PR-AUC 0,767",
-            "Random Forest : PR-AUC 0,986",
-            "XGBoost : recall 0,983, precision 1,000, seuil 0,84",
+            "Random Forest : PR-AUC 0,987",
+            "XGBoost : recall 98,3 %, precision 100 %, seuil 0,67",
+            "3 FN / 0 FP — analyse SHAP + chiffrage couts FP/FN",
         ], FIGURES_DIR / "02_fraud_model_comparison.png"),
         ("content", "Pipeline clustering", "Segments lisibles plutot que score mathematique pur.", [
             "Imputation Income + encodage categories",
-            "K-Means, Agglomerative, GMM testes (k=3 a 6)",
-            "Modele retenu : GMM k=4",
-        ], None),
+            "K-Means, Agglomerative, GMM, DBSCAN (k=3 a 6)",
+            "Modele retenu : GMM k=4 ; DBSCAN ecarte (91 % bruit)",
+        ], FIGURES_DIR / "07_clustering_elbow.png"),
         ("content", "Resultats segmentation", "Quatre segments exploitables malgre silhouette moderee.", [
             "Silhouette : 0,21 ; Davies-Bouldin : 2,42",
             "Projection PCA pour visualiser les groupes",
@@ -160,7 +162,7 @@ def generate_pptx() -> Path:
         ], FIGURES_DIR / "05_cluster_pca_projection.png"),
         ("content", "Profils clients", "Chaque cluster = une action marketing differente.", [
             "Cluster 0 : dormants (1 132) — reactivation",
-            "Cluster 1 : promo digitaux (42) — coupons web",
+            "Cluster 1 : promo digitaux (42) — coupons web + A/B test",
             "Cluster 2 : premium reactifs (175) — VIP",
             "Cluster 3 : fideles stables (891) — cross-sell",
         ], FIGURES_DIR / "06_cluster_profile_heatmap.png"),
@@ -168,13 +170,14 @@ def generate_pptx() -> Path:
             "Scripts src/models + modeles joblib",
             "API : /predict/fraud et /predict/segment",
             "Dashboard multi-pages + tests pytest",
-            "Demo en ligne : Streamlit + Render",
+            "Docker + CI GitHub Actions + monitoring",
         ], None),
         ("content", "Limites et perspectives", "Resultats solides, validation production a poursuivre.", [
-            "Desequilibre extreme et split aleatoire (validation temporelle)",
-            "Explicabilite SHAP et monitoring de derive",
-            "MLflow, CI/CD, Docker pour la suite MLOps",
-        ], None),
+            "Dataset potentiellement tres separable — prudence en prod",
+            "Validation temporelle complementaire realisee",
+            "Protocole campagne cluster 1 documente",
+            "Suivi derive et recalibrage seuil avec le metier",
+        ], FIGURES_DIR / "09_fraud_shap_summary.png"),
     ]
 
     for item in slides_data:

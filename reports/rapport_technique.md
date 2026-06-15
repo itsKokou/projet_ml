@@ -153,24 +153,26 @@ La variable `Campaign_Acceptance_Total` varie fortement d'un client à l'autre.
 
 | Modèle | PR-AUC | Recall | Precision | Seuil | Lecture |
 |--------|-------:|-------:|----------:|------:|---------|
-| Régression logistique | 0,767 | 0,725 | 0,674 | 0,98 | Baseline interprétable mais insuffisante pour un usage opérationnel strict |
-| Random Forest | 0,986 | 0,983 | 1,000 | 0,52 | Très performant ; seuil bas = modèle confiant rapidement |
-| **XGBoost** | **0,991** | **0,983** | **1,000** | **0,84** | **Meilleur classement global ; retenu** |
+| Régression logistique | 0,767 | 0,725 | 0,674 | 0,98 | Baseline interprétable mais insuffisante |
+| Random Forest | 0,987 | 0,983 | 1,000 | 0,52 | Très performant |
+| **XGBoost** | **0,990** | **0,983** | **1,000** | **0,67** | **Meilleur classement global ; retenu** |
+| LightGBM | 0,179 | 0,942 | 0,191 | 0,05 | Testé mais écarté : probabilités mal calibrées sur classe rare |
+| MLP (200k lignes) | 0,869 | 0,784 | 0,882 | 0,22 | Réseau de neurones correct mais inférieur aux arbres boostés |
 
 ![Comparaison des modèles de détection de fraude](figures/02_fraud_model_comparison.png)
 
-**Pourquoi XGBoost plutôt que Random Forest ?**  
-Les deux atteignent recall et precision identiques sur le test, mais XGBoost présente la **meilleure PR-AUC** (0,991 vs 0,986), signe d'un meilleur classement des cas les plus ambigus — utile pour prioriser les alertes.
+**Pourquoi XGBoost plutôt que Random Forest ou LightGBM ?**  
+Random Forest atteint recall et precision identiques, mais XGBoost présente la **meilleure PR-AUC** (0,990 vs 0,987). LightGBM a été testé conformément à l'énoncé mais **échoue à calibrer les probabilités** sur cette classe rare (PR-AUC = 0,179 malgré ROC-AUC = 0,969) — il n'est pas retenu.
 
-**Pourquoi pas la régression logistique ?**  
-Elle reste utile comme modèle explicable (coefficients), mais avec un recall de 0,725 elle laisserait échapper environ **27 % des fraudes** au seuil retenu — inacceptable si la priorité est de minimiser les pertes.
+**Pourquoi pas le MLP ?**  
+Le réseau de neurones (64-32, 200k lignes d'entraînement) atteint une PR-AUC de 0,869 avec un recall de 78,4 % — insuffisant face à l'objectif de détection des fraudes.
 
 ### 5.2 Lecture de la matrice de confusion (estimation test)
 
 Sur le jeu de test (~157 000 transactions, ~171 fraudes) :
 
 - **Fraudes détectées** : ~168 (recall 98,3 %) ;
-- **Fraudes manquées** : ~3 ;
+- **Fraudes manquées** : 3 ;
 - **Faux positifs** : 0 au seuil retenu (precision 100 %).
 
 ![Matrice de confusion estimée pour XGBoost](figures/03_fraud_confusion_matrix_estimated.png)
@@ -179,14 +181,14 @@ Sur le jeu de test (~157 000 transactions, ~171 fraudes) :
 Un score parfait en precision sur un seul jeu de test est **atypique en conditions réelles**. Cela peut indiquer :
 
 1. un dataset très séparable (signaux de soldes très forts) ;
-2. un seuil élevé (0,84) qui ne déclenche que les cas les plus évidents ;
+2. un seuil calibré (0,67) qui équilibre rappel et confiance ;
 3. un risque de **sur-apprentissage** ou de fuite indirecte si les variables de solde reflètent mécaniquement le label.
 
 **Recommandation** : valider sur une période temporelle future (`step` non vue) avant tout déploiement automatique de blocage.
 
 ### 5.3 Le seuil de décision comme choix métier
 
-Le seuil 0,84 signifie : « alerter seulement lorsque le modèle est très confiant ».
+Le seuil 0,67 signifie : « alerter lorsque le modèle est suffisamment confiant tout en respectant la contrainte de rappel minimal ».
 
 | Si on baisse le seuil | Effet |
 |-----------------------|-------|
@@ -195,6 +197,29 @@ Le seuil 0,84 signifie : « alerter seulement lorsque le modèle est très confi
 
 **Interprétation** : le seuil n'est pas un paramètre technique secondaire — c'est le **traducteur entre performance statistique et politique de risque**. Il doit être recalibré avec les équipes en fonction du nombre d'alertes traitables par jour.
 
+#### Chiffrage économique FP / FN
+
+Une analyse de coût a été produite (`models/fraud/fraud_cost_analysis.json`) avec les hypothèses suivantes :
+
+| Hypothèse | Valeur |
+|-----------|--------|
+| Coût d'une revue analyste (FP) | **25 €** par alerte |
+| Coût d'un FN | Somme des **montants** des transactions frauduleuses non détectées (unités du dataset, lues comme EUR à titre illustratif) |
+
+Comparaison de trois seuils sur le jeu de test (171 fraudes) :
+
+| Seuil | FN | FP | Perte FN (unités) | Coût FP (€) | Coût total équivalent |
+|-------|---:|---:|------------------:|------------:|-----------------------:|
+| 0,50 | 3 | 0 | ~2 032 438 | 0 | ~2 032 438 |
+| **0,67 (retenu)** | **3** | **0** | **~2 032 438** | **0** | **~2 032 438** |
+| 0,84 | 3 | 0 | ~2 032 438 | 0 | ~2 032 438 |
+
+Les 3 FN correspondent à des montants élevés (~1,4 M, ~455 k et ~182 k unités) avec probabilités quasi nulles — schémas atypiques que le modèle ne capture pas.
+
+![Scénarios de coût FP/FN par seuil](figures/10_fraud_cost_scenarios.png)
+
+**Lecture métier** : sur ce jeu de test, le modèle ne génère **aucun FP** aux seuils testés ; le compromis se joue donc quasi exclusivement sur les **3 FN restants** (~2 M d'unités de perte illustrative). Baisser le seuil n'améliore pas le rappel ici — les FN sont des cas structurellement difficiles. En production, dès que des FP apparaissent, le coût opérationnel (25 € × nombre d'alertes) devient un levier concret pour recalibrer le seuil avec les équipes de revue.
+
 ### 5.4 Variables explicatives du modèle
 
 L'importance des variables confirme que le modèle s'appuie fortement sur des signaux cohérents avec l'analyse métier : type de transaction, montants, soldes et variables dérivées d'incohérence.
@@ -202,6 +227,10 @@ L'importance des variables confirme que le modèle s'appuie fortement sur des si
 ![Importance des variables du modèle fraude](figures/04_fraud_feature_importance.png)
 
 **Interprétation** : cette lecture ne remplace pas une analyse SHAP, mais elle donne déjà un contrôle de cohérence. Si les variables les plus importantes étaient des identifiants techniques ou des colonnes impossibles à connaître en production, cela signalerait un risque de fuite de données. Ici, les signaux dominants restent compatibles avec une logique opérationnelle.
+
+L'analyse **SHAP** (échantillon de 4 000 transactions) confirme les mêmes signaux : erreurs de soldes, type de transaction et montants dominent les contributions à la probabilité de fraude.
+
+![Importance SHAP moyenne — classe fraude](figures/09_fraud_shap_summary.png)
 
 ### 5.5 Typologie des cas difficiles (hypothèses)
 
@@ -212,6 +241,46 @@ Même avec un excellent modèle, certains cas restent difficiles :
 - nouveaux schémas de fraude non représentés dans l'historique.
 
 **Interprétation** : le modèle doit être vu comme un **filtre intelligent**, pas comme un substitut complet à l'expertise humaine.
+
+### 5.6 Validation temporelle (`step`)
+
+En complément du split aléatoire stratifié, une évaluation **temporelle** a été réalisée : entraînement sur les périodes les plus anciennes, validation et test sur des `step` postérieurs non vus à l'entraînement.
+
+![Comparaison split aléatoire vs temporel](figures/07_fraud_temporal_comparison.png)
+
+**Lecture** : si les métriques chutent nettement en split temporel, le modèle risque de mal généraliser lorsque les schémas de fraude évoluent. Cette expérience répond directement à la recommandation formulée en section 5.2.
+
+Les détails sont exportés dans `models/fraud/fraud_temporal_metrics.json`.
+
+### 5.7 Analyse des faux négatifs et quasi-faux positifs
+
+Une analyse ciblée des erreurs a été produite sur le jeu de test (split aléatoire) :
+
+![Synthèse des erreurs de classification](figures/08_fraud_error_summary.png)
+
+| Type d'erreur | Enjeu métier | Action recommandée |
+|---------------|--------------|-------------------|
+| **Faux négatif (FN)** | Fraude non détectée → perte financière | Analyser chaque FN pour détecter un schéma récurrent |
+| **Faux positif (FP)** | Alerte inutile → coût opérationnel | Prioriser la revue humaine ; ajuster le seuil si surcharge |
+
+Les cas détaillés sont disponibles dans :
+- `models/fraud/fraud_false_negatives.csv`
+- `models/fraud/fraud_false_positives.csv`
+
+Lorsque le seuil retenu (0,67) ne génère aucun FP, des **quasi-faux positifs** sont listés en abaissant le seuil à 0,50 : ce sont des transactions normales avec probabilité élevée, utiles pour anticiper la charge d'alertes si le seuil était abaissé.
+
+### 5.8 Périmètre des modèles (énoncé vs implémenté)
+
+| Modèle demandé | Statut | Raison |
+|----------------|--------|--------|
+| Régression logistique | ✅ Implémenté | Baseline interprétable |
+| Random Forest | ✅ Implémenté | Bon compromis performance / robustesse |
+| XGBoost | ✅ Implémenté | **Modèle retenu** (meilleure PR-AUC) |
+| LightGBM | ✅ Testé, ❌ non retenu | Probabilités mal calibrées sur classe rare (PR-AUC 0,18) |
+| Réseaux de neurones (MLP) | ✅ Testé, ❌ non retenu | Recall 78,4 % — insuffisant ; entraîné sur 200k lignes |
+| SMOTE | ❌ Non utilisé | Déséquilibre traité via `class_weight` / `scale_pos_weight` |
+
+> XGBoost, Random Forest et LightGBM utilisent le **train complet** (~734k). Le MLP utilise **200k lignes** (coût calcul du réseau de neurones).
 
 ---
 
@@ -230,6 +299,22 @@ Le modèle retenu (`GMM`, k = 4) affiche :
 **Interprétation** : un score silhouette faible ne signifie pas que la segmentation est inutile. En marketing, les clients occupent souvent un **continuum** (du client occasionnel au client premium). L'objectif n'est pas la perfection mathématique mais la **lisibilité des personas** et leur **actionnabilité**.
 
 Le choix de 4 clusters est justifié car il produit des profils contrastés sans fragmenter excessivement la base.
+
+La **méthode du coude** (Elbow) sur K-Means conforte ce choix : l'inertie diminue fortement jusqu'à k ≈ 4, puis se stabilise.
+
+![Elbow Method — K-Means](figures/07_clustering_elbow.png)
+
+### 6.1bis Évaluation DBSCAN (énoncé)
+
+DBSCAN a été testé sur une grille de paramètres (`eps` × `min_samples`). La meilleure configuration (`eps=2.0`, `min_samples=10`) produit :
+
+- **Silhouette : 0,21** (proche de GMM k=4) ;
+- **2 clusters** seulement ;
+- **91,5 % de points classés comme bruit** (`-1`).
+
+![DBSCAN vs GMM k=4](figures/08_clustering_dbscan_comparison.png)
+
+**Conclusion** : DBSCAN est **écarté** du modèle de production car il ne fournit pas de `predict()` natif pour l'API, génère une part massive de bruit et ne produit pas de segments marketing exploitables. Les résultats détaillés sont dans `models/clustering/clustering_dbscan_comparison.csv`.
 
 ### 6.2 Personas interprétés
 
@@ -260,6 +345,8 @@ Le choix de 4 clusters est justifié car il produit des profils contrastés sans
 **Interprétation** : segment **petit mais hyper-réactif** aux offres. Comportement typique du client qui achète quand il y a une réduction, surtout en ligne. Âge moyen élevé (62 ans) : ne pas associer automatiquement « digital » à « jeune ».
 
 **Enjeu** : ROI élevé sur campagnes ciblées (coupons, flash sales web). Attention au risque de **cannibalisation des marges**.
+
+Un **protocole de campagne test A/B** (21 clients témoin / 21 clients traitement, coupon web -15 %, 4 semaines) est documenté dans [`docs/CAMPAGNE_CLUSTER1.md`](../docs/CAMPAGNE_CLUSTER1.md) pour valider l'actionnabilité du segment avant industrialisation.
 
 ---
 
@@ -321,8 +408,8 @@ Le choix de 4 clusters est justifié car il produit des profils contrastés sans
 
 | Niveau de score | Action recommandée | Justification |
 |-----------------|-------------------|---------------|
-| Score ≥ 0,84 (seuil actuel) | Alerte prioritaire + vérification | Confiance élevée du modèle |
-| Score 0,50 – 0,84 | Revue humaine si type = TRANSFER/CASH_OUT | Zone grise — équilibre coût/risque |
+| Score ≥ 0,67 (seuil actuel) | Alerte prioritaire + vérification | Confiance élevée du modèle |
+| Score 0,50 – 0,67 | Revue humaine si type = TRANSFER/CASH_OUT | Zone grise — équilibre coût/risque |
 | Score < 0,50 | Traitement standard | Risque faible sur historique |
 
 **Priorités opérationnelles** :
@@ -355,7 +442,7 @@ Le projet dispose déjà d'une couche de prédiction exploitable :
 {
   "prediction": 1,
   "probability": 0.92,
-  "threshold": 0.84,
+  "threshold": 0.67,
   "model": "xgboost"
 }
 ```
@@ -374,15 +461,24 @@ Le projet dispose déjà d'une couche de prédiction exploitable :
 
 **Lecture métier** : le segment doit être relié à la table de personas. Par exemple, le segment 2 correspond aux clients premium ultra-engagés et appelle une stratégie VIP/personnalisée.
 
-#### Architecture de déploiement recommandée
+#### Architecture de déploiement
 
 | Brique | Rôle | Technologie actuelle |
 |--------|------|---------------------|
 | Dashboard | Démonstration, analyse et prédiction interactive | Streamlit |
 | API | Scoring programmé par requête HTTP | FastAPI |
 | Modèles | Artefacts d'inférence | `joblib` |
-| Données | Sources brutes et résultats de modélisation | CSV |
-| Monitoring cible | Suivi performance et dérive | MLflow / Evidently AI à ajouter |
+| Données | Sources brutes (Git LFS pour fraude) | CSV |
+| Conteneurisation | Reproductibilité locale / serveur | Docker + `docker-compose` |
+| CI/CD | Tests automatiques à chaque push | GitHub Actions |
+| Monitoring MVP | Vérification artefacts et seuils | `scripts/check_ml_health.py` |
+| Monitoring cible | Drift et suivi temporel | Evidently AI / MLflow (roadmap) |
+
+Démarrage local conteneurisé :
+
+```bash
+docker compose up --build
+```
 
 ---
 
@@ -393,9 +489,9 @@ Le projet dispose déjà d'une couche de prédiction exploitable :
 | Limite | Impact sur l'interprétation |
 |--------|----------------------------|
 | Dataset potentiellement synthétique ou très structuré | Performance peut être optimiste vs production |
-| Pas de validation temporelle stricte | Risque de sur-estimation si les fraudes changent de schéma |
+| Validation temporelle complémentaire réalisée | Écart modéré vs split aléatoire — à confirmer sur périodes futures |
 | Variables de soldes très prédictives | Si qualité des soldes dégradée en prod, performance chute |
-| Coûts FP/FN non chiffrés | Impossible de justifier formellement le seuil 0,84 |
+| Chiffrage FP/FN basé sur hypothèses | Coût FP fixé à 25 €/alerte ; montants FN en unités dataset — à recalibrer avec le métier |
 | `isFlaggedFraud` exclu | Correct méthodologiquement, mais le modèle ne reproduit pas le système existant |
 
 ### 8.2 Segmentation
@@ -403,7 +499,7 @@ Le projet dispose déjà d'une couche de prédiction exploitable :
 | Limite | Impact sur l'interprétation |
 |--------|----------------------------|
 | Silhouette modérée (0,21) | Frontières entre clusters floues — certains clients sont « entre deux » |
-| Cluster 1 très petit (42) | Statistiques instables ; campagnes à tester prudemment |
+| Cluster 1 très petit (42) | Statistiques instables ; protocole A/B documenté pour test prudent |
 | Pas d'historique temporel | Segments peuvent évoluer ; recalcul périodique nécessaire |
 | `Response` exclu du clustering | Le modèle ne prédit pas directement la conversion future |
 
@@ -431,7 +527,6 @@ Le projet dispose déjà d'une couche de prédiction exploitable :
 
 L'analyse actuelle permet de formuler des recommandations, mais plusieurs points méritent une validation supplémentaire avant toute généralisation :
 
-- **Explicabilité des alertes fraude** : le modèle performe, mais sans analyse des contributions individuelles (ex. SHAP), il reste difficile d'expliquer au métier *pourquoi* une transaction est bloquée — ce qui limite la confiance des équipes de revue manuelle.
-- **Robustesse dans le temps** : les résultats sont évalués sur un split aléatoire ; une découpe par période (`step`) vérifierait si le modèle tient face à l'évolution des schémas de fraude.
-- **Actionnabilité des segments** : les profils clusters 0 et 1 (dormants et promo-chasseurs) sont les plus incertains statistiquement ; seule une campagne test mesurerait si la segmentation se traduit en réactivation ou en ROI réel.
+- **Robustesse dans le temps** : une validation temporelle complémentaire a été réalisée ; le suivi sur de nouvelles périodes `step` reste nécessaire en production.
+- **Actionnabilité des segments** : un protocole de campagne test A/B est prêt pour le cluster 1 ; les clusters 0 et dormants restent à valider par des actions terrain mesurées.
 - **Stabilité des personas** : sans recalcul périodique, on ne sait pas si les quatre segments restent valides ou si les clients migrent d'un profil à l'autre au fil des trimestres.

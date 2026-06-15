@@ -1,0 +1,58 @@
+{
+  "threshold": 0.67,
+  "test_size": 157287,
+  "false_negatives": 3,
+  "false_positives": 0,
+  "recall_at_threshold": 0.9824561403508771,
+  "precision_at_threshold": 1.0,
+  "low_threshold_for_quasi_fp": 0.5,
+  "fp_case_label": "quasi_false_positive_threshold_0.5",
+  "false_negative_cases": [
+    {
+      "step": 43,
+      "type": "TRANSFER",
+      "amount": 1395850.55,
+      "oldbalanceOrg": NaN,
+      "newbalanceOrig": 0.0,
+      "oldbalanceDest": 260806.21,
+      "newbalanceDest": 1656656.77,
+      "origin_error": NaN,
+      "dest_error": 0.010000000009313226,
+      "isFraud": 1,
+      "proba": 5.992483806949167e-07,
+      "prediction": 0,
+      "error_type": "false_negative"
+    },
+    {
+      "step": 13,
+      "type": "CASH_OUT",
+      "amount": 454859.39,
+      "oldbalanceOrg": NaN,
+      "newbalanceOrig": 0.0,
+      "oldbalanceDest": 0.0,
+      "newbalanceDest": 454859.39,
+      "origin_error": NaN,
+      "dest_error": 0.0,
+      "isFraud": 1,
+      "proba": 0.0007666101446375251,
+      "prediction": 0,
+      "error_type": "false_negative"
+    },
+    {
+      "step": 8,
+      "type": "CASH_OUT",
+      "amount": 181728.11,
+      "oldbalanceOrg": NaN,
+      "newbalanceOrig": 0.0,
+      "oldbalanceDest": 11397.0,
+      "newbalanceDest": 184477.77,
+      "origin_error": NaN,
+      "dest_error": -8647.339999999997,
+      "isFraud": 1,
+      "proba": 0.04446939751505852,
+      "prediction": 0,
+      "error_type": "false_negative"
+    }
+  ],
+  "false_positive_cases": []
+}

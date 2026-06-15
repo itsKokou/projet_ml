@@ -1,0 +1,7 @@
+[
+  {
+    "model": "SMOTE (imbalanced-learn)",
+    "status": "non_utilise",
+    "raison": "Déséquilibre traité via class_weight / scale_pos_weight ; SMOTE non retenu (surdimensionnement artificiel)."
+  }
+]

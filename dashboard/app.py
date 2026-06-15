@@ -39,11 +39,13 @@ _REPORT_IMG_RE = re.compile(
 )
 
 FRAUD_MODEL_ORDER = ["xgboost", "random_forest", "logistic_regression"]
+FRAUD_DISPLAY_SAMPLE_SIZE = 300_000
+FRAUD_THRESHOLD_SIM_SAMPLE_SIZE = 180_000
 SEGMENT_NAMES = {
-    0: "Faible valeur / faible engagement",
-    1: "Promotionnel et digital",
-    2: "Premium très réactif",
-    3: "Forte valeur stable",
+    0: "Dormants à faible valeur",
+    1: "Chasseurs de promotions digitaux",
+    2: "Premium ultra-engagés",
+    3: "Fidèles à forte valeur",
 }
 SEGMENT_ACTIONS = {
     0: "Réactivation, offres accessibles, parcours d'onboarding.",
@@ -315,9 +317,29 @@ def _resolve_report_image(match: re.Match[str]) -> str:
 
 
 def render_report_markdown(content: str) -> None:
-    """Affiche le rapport en résolvant les chemins d'images du dossier reports/."""
-    resolved = _REPORT_IMG_RE.sub(_resolve_report_image, content)
+    """Affiche le rapport en résolvant les chemins d'images et liens docs du dossier reports/."""
+
+    def _resolve_doc_link(match: re.Match[str]) -> str:
+        text = match.group("text")
+        href = match.group("href").strip()
+        if href.startswith("../docs/"):
+            doc_path = PROJECT_ROOT / "docs" / href.removeprefix("../docs/")
+            if doc_path.is_file():
+                rel = doc_path.relative_to(PROJECT_ROOT).as_posix()
+                return f"**{text}** (`{rel}` — téléchargeable depuis le dépôt)"
+        return match.group(0)
+
+    link_pattern = re.compile(r"\[(?P<text>[^\]]+)\]\((?P<href>[^)]+)\)")
+    with_doc_links = link_pattern.sub(_resolve_doc_link, content)
+    resolved = _REPORT_IMG_RE.sub(_resolve_report_image, with_doc_links)
     st.markdown(resolved, unsafe_allow_html=True)
+
+
+@st.cache_data(show_spinner=False)
+def load_json_artifact(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 @st.cache_data(show_spinner=False)
@@ -325,6 +347,34 @@ def read_csv_cached(path: Path, sep: str = ",", **kwargs) -> pd.DataFrame:
     if not path.exists():
         return pd.DataFrame()
     return pd.read_csv(path, sep=sep, **kwargs)
+
+
+@st.cache_data(show_spinner=False)
+def fraud_dataset_size() -> int:
+    """Nombre total de lignes dans le CSV fraude (sans charger tout le dataframe)."""
+    path = DATA_DIR / "detection_fraude.csv"
+    if not path.is_file():
+        return 0
+    with path.open(encoding="utf-8", errors="replace") as handle:
+        return max(sum(1 for _ in handle) - 1, 0)
+
+
+def _format_compact_count(value: int) -> str:
+    if value >= 1_000_000:
+        millions = value / 1_000_000
+        text = f"{millions:.2f}".rstrip("0").rstrip(".")
+        return f"{text.replace('.', ',')}M"
+    if value >= 1_000:
+        return f"{round(value / 1_000)}k"
+    return str(value)
+
+
+def _format_fraud_sample_label(sample_size: int) -> str:
+    total = fraud_dataset_size()
+    sample_label = _format_compact_count(sample_size)
+    if total <= 0 or total == sample_size:
+        return f"{sample_size:,}".replace(",", " ")
+    return f"{sample_label} / {_format_compact_count(total)}"
 
 
 @st.cache_data(show_spinner=False)
@@ -502,7 +552,7 @@ def render_sidebar_navigation(active_slug: str) -> None:
 
 
 @st.cache_data(show_spinner=False)
-def fraud_type_summary(sample_size: int = 300_000) -> pd.DataFrame:
+def fraud_type_summary(sample_size: int = FRAUD_DISPLAY_SAMPLE_SIZE) -> pd.DataFrame:
     df = load_fraud_sample(sample_size)
     if df.empty:
         return pd.DataFrame()
@@ -532,7 +582,7 @@ def fraud_class_summary() -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
-def fraud_time_summary(sample_size: int = 300_000) -> pd.DataFrame:
+def fraud_time_summary(sample_size: int = FRAUD_DISPLAY_SAMPLE_SIZE) -> pd.DataFrame:
     df = load_fraud_sample(sample_size)
     if df.empty or "step" not in df.columns:
         return pd.DataFrame()
@@ -616,7 +666,7 @@ def fraud_suspicious_examples(limit: int = 12) -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
-def fraud_threshold_curve(sample_size: int = 180_000) -> pd.DataFrame:
+def fraud_threshold_curve(sample_size: int = FRAUD_THRESHOLD_SIM_SAMPLE_SIZE) -> pd.DataFrame:
     model = load_fraud_model()
     if model is None:
         return pd.DataFrame()
@@ -953,8 +1003,17 @@ def _render_fraud_shap_tab_content() -> None:
 
     st.caption(
         f"Modèle : **{_best_fraud_name()}** — SHAP indique comment chaque variable déplace la probabilité "
-        "de fraude (référence = comportement moyen sur un échantillon stratifié)."
+        "de fraude (référence = comportement moyen sur un échantillon stratifié de ~5 000 transactions, "
+        "tiré de 200k). Le classement peut différer légèrement de la figure statique du rapport."
     )
+
+    shap_report_fig = REPORT_DIR / "figures" / "09_fraud_shap_summary.png"
+    if shap_report_fig.is_file():
+        with st.expander("Figure de référence — rapport technique"):
+            st.image(
+                str(shap_report_fig),
+                caption="Export statique (`generate_report_figures.py`) — échantillon fixe de 4 000 transactions",
+            )
 
     global_df = fraud_shap_global_summary()
     if global_df.empty:
@@ -1180,7 +1239,7 @@ def show_overview() -> None:
     best_fraud = _best_fraud_name()
     best_cluster = _best_cluster_name()
 
-    fraud_df = load_fraud_sample(300_000)
+    fraud_df = load_fraud_sample(FRAUD_DISPLAY_SAMPLE_SIZE)
     cluster_df = load_cluster_raw()
     fraud_rate = float(fraud_df["isFraud"].mean()) if not fraud_df.empty else 0.0
     best_pr_auc = _metric_value(fraud_cmp, best_fraud, "pr_auc")
@@ -1197,12 +1256,22 @@ def show_overview() -> None:
 
     st.subheader("Indicateurs clés")
     r1c1, r1c2, r1c3, r1c4, r1c5, r1c6 = st.columns(6)
-    render_kpi_card(r1c1, "Échantillon fraude", f"{len(fraud_df):,}".replace(",", " "), "teal")
-    render_kpi_card(r1c2, "Taux de fraude", _format_percent(fraud_rate, 3), "rose")
+    render_kpi_card(
+        r1c1,
+        "Échantillon affiché",
+        _format_fraud_sample_label(len(fraud_df)),
+        "teal",
+    )
+    render_kpi_card(r1c2, "Taux de fraude (échantillon)", _format_percent(fraud_rate, 3), "rose")
     render_kpi_card(r1c3, "PR-AUC (test)", f"{best_pr_auc:.4f}", "blue")
     render_kpi_card(r1c4, "Rappel (test)", _format_percent(best_recall, 1), "indigo")
     render_kpi_card(r1c5, "Précision (test)", _format_percent(best_precision, 1), "emerald")
     render_kpi_card(r1c6, "Seuil retenu", f"{best_threshold:.2f}", "amber")
+    st.caption(
+        f"L'échantillon affiché ({_format_fraud_sample_label(len(fraud_df))}) sert aux graphiques exploratoires. "
+        "PR-AUC, rappel, précision et seuil proviennent du **jeu de test officiel** "
+        f"({int(_metric_value(fraud_cmp, best_fraud, 'test_size', 0)):,} lignes).".replace(",", " ")
+    )
 
     r2c1, r2c2, r2c3, r2c4, r2c5, r2c6 = st.columns(6)
     render_kpi_card(
@@ -1297,6 +1366,100 @@ def show_overview() -> None:
         )
 
 
+def render_fraud_advanced_analysis() -> None:
+    """Panneaux coûts FP/FN, erreurs et validation temporelle (artefacts exportés)."""
+    cost_data = load_json_artifact(FRAUD_DIR / "fraud_cost_analysis.json")
+    error_data = load_json_artifact(FRAUD_DIR / "fraud_error_analysis.json")
+    temporal_data = load_json_artifact(FRAUD_DIR / "fraud_temporal_metrics.json")
+
+    if not cost_data and not error_data and not temporal_data:
+        st.info(
+            "Analyses avancées indisponibles. Lancez `python -m src.models.train_fraud_model` "
+            "puis `python -c \"from src.models.fraud_experiments import export_cost_analysis; export_cost_analysis()\"`."
+        )
+        return
+
+    st.caption(
+        "Données issues des exports d'entraînement (jeu de test officiel). "
+        "La courbe de seuil de l'onglet précédent est une simulation sur échantillon."
+    )
+
+    if temporal_data:
+        st.subheader("Validation temporelle (split par `step`)")
+        t1, t2, t3, t4, t5 = st.columns(5)
+        t1.metric("PR-AUC temporel", f"{temporal_data.get('pr_auc', 0):.4f}")
+        t2.metric("Rappel", _format_percent(float(temporal_data.get("recall", 0)), 2))
+        t3.metric("Précision", _format_percent(float(temporal_data.get("precision", 0)), 2))
+        t4.metric("Seuil calibré", f"{float(temporal_data.get('threshold', 0)):.2f}")
+        t5.metric("Stratégie", temporal_data.get("split_strategy", "—"))
+        temporal_fig = REPORT_DIR / "figures" / "07_fraud_temporal_comparison.png"
+        if temporal_fig.is_file():
+            st.image(str(temporal_fig), caption="Comparaison split aléatoire vs temporel")
+
+    if error_data:
+        st.subheader("Analyse des erreurs (jeu de test)")
+        e1, e2, e3, e4 = st.columns(4)
+        e1.metric("Faux négatifs", int(error_data.get("false_negatives", 0)))
+        e2.metric("Faux positifs", int(error_data.get("false_positives", 0)))
+        e3.metric("Rappel au seuil", _format_percent(float(error_data.get("recall_at_threshold", 0)), 2))
+        e4.metric("Seuil retenu", f"{float(error_data.get('threshold', 0)):.2f}")
+        error_fig = REPORT_DIR / "figures" / "08_fraud_error_summary.png"
+        if error_fig.is_file():
+            st.image(str(error_fig), caption="Synthèse FN / FP sur le jeu de test")
+
+        fn_path = FRAUD_DIR / "fraud_false_negatives.csv"
+        if fn_path.is_file():
+            fn_df = read_csv_cached(fn_path)
+            if not fn_df.empty:
+                st.markdown("**Détail des faux négatifs**")
+                st.dataframe(fn_df, width="stretch", hide_index=True)
+
+    if cost_data:
+        st.subheader("Chiffrage économique FP / FN")
+        assumptions = cost_data.get("assumptions", {})
+        st.write(
+            f"Hypothèse revue analyste : **{assumptions.get('cost_per_fp_review_eur', 25):.0f} €/FP**. "
+            f"{assumptions.get('fn_cost_model', '')}"
+        )
+        scenarios = cost_data.get("scenarios", [])
+        if scenarios:
+            cost_df = pd.DataFrame(scenarios)
+            display_cols = [
+                c
+                for c in [
+                    "threshold",
+                    "false_negatives",
+                    "false_positives",
+                    "recall",
+                    "precision",
+                    "fn_financial_loss_units",
+                    "fp_operational_cost_eur",
+                    "total_cost_eur_equivalent",
+                    "is_selected_threshold",
+                ]
+                if c in cost_df.columns
+            ]
+            st.dataframe(
+                cost_df[display_cols].style.format(
+                    {
+                        "threshold": "{:.2f}",
+                        "recall": "{:.2%}",
+                        "precision": "{:.2%}",
+                        "fn_financial_loss_units": "{:,.0f}",
+                        "fp_operational_cost_eur": "{:,.0f}",
+                        "total_cost_eur_equivalent": "{:,.0f}",
+                    }
+                ),
+                width="stretch",
+                hide_index=True,
+            )
+        cost_fig = REPORT_DIR / "figures" / "10_fraud_cost_scenarios.png"
+        if cost_fig.is_file():
+            st.image(str(cost_fig), caption="Scénarios de coût par seuil")
+        if cost_data.get("recommendation"):
+            st.info(cost_data["recommendation"])
+
+
 def show_fraud_results() -> None:
     render_header(
         "Détection de fraude",
@@ -1321,8 +1484,8 @@ def show_fraud_results() -> None:
     k4.metric("Précision", _format_percent(float(best_row.get("precision", 0)), 2))
     k5.metric("Seuil retenu", f"{best_row.get('threshold', 0):.2f}")
 
-    tab_perf, tab_data, tab_threshold, tab_lab, tab_shap = st.tabs(
-        ["Performance", "Analyse données", "Seuil et alertes", "Simulateur", "Explications SHAP"]
+    tab_perf, tab_data, tab_threshold, tab_adv, tab_lab, tab_shap = st.tabs(
+        ["Performance", "Analyse données", "Seuil et alertes", "Analyses avancées", "Simulateur", "Explications SHAP"]
     )
 
     with tab_perf:
@@ -1489,6 +1652,12 @@ def show_fraud_results() -> None:
             )
 
     with tab_threshold:
+        st.caption(
+            f"Simulation interactive sur un échantillon aléatoire de "
+            f"**{FRAUD_THRESHOLD_SIM_SAMPLE_SIZE:,}** transactions (performance dashboard). "
+            "Les métriques officielles du jeu de test et le chiffrage FP/FN sont dans l'onglet "
+            "**Analyses avancées**.".replace(",", " ")
+        )
         curve = fraud_threshold_curve()
         if curve.empty:
             st.info("La courbe de seuil n'est pas disponible.")
@@ -1523,6 +1692,9 @@ def show_fraud_results() -> None:
             col_a.metric("Fraudes test estimées", f"{confusion['positives']:.0f}")
             col_b.metric("Fraudes détectées estimées", f"{confusion['tp']:.0f}")
             col_c.metric("Fraudes manquées estimées", f"{confusion['fn']:.0f}")
+
+    with tab_adv:
+        render_fraud_advanced_analysis()
 
     with tab_lab:
         fraud_playground(form_key="fraud_sim")
@@ -2308,8 +2480,13 @@ def show_mlops() -> None:
         for path in [
             FRAUD_DIR / "fraud_model.joblib",
             FRAUD_DIR / "fraud_model_comparison.csv",
+            FRAUD_DIR / "fraud_cost_analysis.json",
+            FRAUD_DIR / "fraud_error_analysis.json",
+            FRAUD_DIR / "fraud_temporal_metrics.json",
             CLUSTER_DIR / "cluster_model.joblib",
             CLUSTER_DIR / "cluster_profiles.csv",
+            CLUSTER_DIR / "clustering_dbscan_comparison.csv",
+            PROJECT_ROOT / "docs" / "CAMPAGNE_CLUSTER1.md",
             PROJECT_ROOT / "src" / "api" / "main.py",
             PROJECT_ROOT / "dashboard" / "app.py",
         ]:
@@ -2338,9 +2515,10 @@ def show_mlops() -> None:
     st.subheader("Roadmap technique")
     roadmap = pd.DataFrame(
         [
-            ["Court terme", "SHAP, figures rapport, validation métier des clusters"],
-            ["Moyen terme", "MLflow, DVC/Git LFS, Docker, GitHub Actions"],
-            ["Long terme", "Monitoring drift, réentraînement programmé, registre modèle"],
+            ["Réalisé", "SHAP, figures rapport, Docker, CI GitHub Actions, chiffrage coûts FP/FN"],
+            ["Court terme", "Protocole campagne cluster 1, validation terrain des segments"],
+            ["Moyen terme", "Monitoring drift (Evidently), recalibrage seuil avec le métier"],
+            ["Long terme", "Réentraînement programmé, registre modèle, alerting production"],
         ],
         columns=["Horizon", "Actions"],
     )

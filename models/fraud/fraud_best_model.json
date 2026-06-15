@@ -1,5 +1,5 @@
 {
   "best_model": "xgboost",
   "selection_metric": "pr_auc",
-  "best_pr_auc": 0.991035317737093
+  "best_pr_auc": 0.9904465675396192
 }

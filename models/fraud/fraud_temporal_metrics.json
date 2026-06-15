@@ -1,0 +1,17 @@
+{
+  "accuracy": 0.9999864850254081,
+  "precision": 1.0,
+  "recall": 0.9968944099378882,
+  "f1": 0.9984447900466563,
+  "roc_auc": 0.9986156685808039,
+  "pr_auc": 0.9970102689639408,
+  "threshold": 0.99,
+  "train_size": 765278,
+  "val_size": 135313,
+  "test_size": 147984,
+  "positive_rate_test": 0.004351821818574981,
+  "split_strategy": "temporal_step",
+  "train_step_max": 38.0,
+  "test_step_min": 43.0,
+  "min_recall_constraint": 0.75
+}

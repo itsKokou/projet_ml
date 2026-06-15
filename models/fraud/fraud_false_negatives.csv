@@ -1,0 +1,4 @@
+step,type,amount,oldbalanceOrg,newbalanceOrig,oldbalanceDest,newbalanceDest,origin_error,dest_error,isFraud,proba,prediction,error_type
+43,TRANSFER,1395850.55,,0.0,260806.21,1656656.77,,0.010000000009313226,1,5.992484e-07,0,false_negative
+13,CASH_OUT,454859.39,,0.0,0.0,454859.39,,0.0,1,0.00076661014,0,false_negative
+8,CASH_OUT,181728.11,,0.0,11397.0,184477.77,,-8647.339999999997,1,0.044469398,0,false_negative

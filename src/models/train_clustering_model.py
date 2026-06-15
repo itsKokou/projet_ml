@@ -11,7 +11,7 @@ import joblib
 import numpy as np
 import pandas as pd
 from sklearn.base import clone
-from sklearn.cluster import AgglomerativeClustering, KMeans
+from sklearn.cluster import AgglomerativeClustering, DBSCAN, KMeans
 from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import calinski_harabasz_score, davies_bouldin_score
@@ -123,6 +123,49 @@ def _profile_clusters(df_raw: pd.DataFrame, labels: np.ndarray) -> pd.DataFrame:
     return out.reset_index()
 
 
+def evaluate_dbscan_configs(X_transformed: np.ndarray) -> Dict[str, Dict[str, float]]:
+    """Explore DBSCAN sur une grille eps/min_samples (hors selection du modele final)."""
+    results: Dict[str, Dict[str, float]] = {}
+
+    for eps in [0.8, 1.0, 1.2, 1.5, 2.0, 2.5, 3.0]:
+        for min_samples in [5, 10, 15, 20]:
+            labels = DBSCAN(eps=eps, min_samples=min_samples).fit_predict(X_transformed)
+            n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
+            noise_ratio = float((labels == -1).mean())
+            key = f"dbscan_eps{eps}_min{min_samples}"
+
+            if n_clusters < 2:
+                results[key] = {
+                    "silhouette": -1.0,
+                    "davies_bouldin": float("inf"),
+                    "calinski_harabasz": 0.0,
+                    "n_clusters": int(n_clusters),
+                    "noise_ratio": noise_ratio,
+                    "status": "rejected_too_few_clusters",
+                }
+                continue
+
+            mask = labels != -1
+            if int(mask.sum()) < 50:
+                results[key] = {
+                    "silhouette": -1.0,
+                    "davies_bouldin": float("inf"),
+                    "calinski_harabasz": 0.0,
+                    "n_clusters": int(n_clusters),
+                    "noise_ratio": noise_ratio,
+                    "status": "rejected_too_much_noise",
+                }
+                continue
+
+            metrics = _score_clustering(X_transformed[mask], labels[mask])
+            metrics["n_clusters"] = int(n_clusters)
+            metrics["noise_ratio"] = noise_ratio
+            metrics["status"] = "evaluated"
+            results[key] = metrics
+
+    return results
+
+
 def train_and_compare_clustering_models(
     models_dir: Path = Path("models/clustering"),
 ) -> dict:
@@ -213,10 +256,38 @@ def train_and_compare_clustering_models(
     pd.DataFrame(results).T.to_csv(comparison_csv, index=True)
     _profile_clusters(X, best_labels).to_csv(profile_csv, index=False)
 
+    elbow_rows = []
+    for k in range(2, 11):
+        km = KMeans(n_clusters=k, random_state=42, n_init=20)
+        km.fit(X_transformed)
+        elbow_rows.append({"k": k, "inertia": float(km.inertia_)})
+    pd.DataFrame(elbow_rows).to_csv(models_dir / "clustering_elbow.csv", index=False)
+
+    dbscan_results = evaluate_dbscan_configs(X_transformed)
+    (models_dir / "clustering_dbscan_comparison.json").write_text(
+        json.dumps(dbscan_results, indent=2), encoding="utf-8"
+    )
+    pd.DataFrame(dbscan_results).T.to_csv(models_dir / "clustering_dbscan_comparison.csv", index=True)
+
+    best_dbscan_key = None
+    best_dbscan_score = -np.inf
+    for key, metrics in dbscan_results.items():
+        if metrics.get("status") != "evaluated":
+            continue
+        score = metrics["silhouette"] - 0.05 * metrics["davies_bouldin"]
+        if score > best_dbscan_score:
+            best_dbscan_score = score
+            best_dbscan_key = key
+
     best_info = {
         "best_model": best_key,
         "selection_score": float(best_score),
         "metrics": results[best_key],
+        "dbscan_best_config": best_dbscan_key,
+        "dbscan_note": (
+            "DBSCAN exclu du modele de production : pas de predict() natif, "
+            "bruit eleve et segments peu exploitables pour le marketing."
+        ),
     }
     best_info_json.write_text(json.dumps(best_info, indent=2), encoding="utf-8")
 

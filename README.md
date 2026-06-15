@@ -71,7 +71,7 @@ Dans un contexte bancaire et marketing, l'entreprise souhaite :
 | **Cible** | `isFraud` (0 = normal, 1 = fraude) |
 | **Volume** | ~1 048 575 transactions |
 | **Contrainte majeure** | Classe fortement déséquilibrée (~0,11 % de fraudes) |
-| **Modèles testés** | Régression logistique, Random Forest, XGBoost |
+| **Modèles testés** | Régression logistique, Random Forest, XGBoost, LightGBM, MLP |
 | **Métriques** | PR-AUC, Recall, Precision, F1, ROC-AUC, matrice de confusion |
 | **Décision métier** | Seuil calibré sur validation (contrainte de rappel minimal) |
 
@@ -82,7 +82,7 @@ Dans un contexte bancaire et marketing, l'entreprise souhaite :
 | **Fichier** | `data/raw/data_cluster.csv` |
 | **Objectif** | Identifier des groupes de clients au comportement similaire |
 | **Volume** | 2 240 clients, 29 variables |
-| **Modèles testés** | K-Means, Agglomerative Clustering, Gaussian Mixture (k = 3 à 6) |
+| **Modèles testés** | K-Means, Agglomerative Clustering, GMM, DBSCAN (k = 3 à 6) |
 | **Métriques** | Silhouette, Davies-Bouldin, Calinski-Harabasz |
 | **Livrable métier** | Profils de segments + recommandations marketing |
 
@@ -167,16 +167,21 @@ Requête JSON
 ```text
 .
 ├── README.md                          # Documentation principale (ce fichier)
+├── SUIVI_AMELIORATIONS.md             # Suivi post-audit des améliorations
 ├── OLD_README.md                      # Cahier des charges / notes détaillées
-├── PLAN_README.md                     # Plan opérationnel J1–J7
-├── requirements.txt
+├── Dockerfile
+├── docker-compose.yml
+├── .github/workflows/ci.yml
+├── docs/MONITORING.md
 ├── data/
 │   ├── raw/                           # Données brutes (CSV)
 │   ├── processed/                     # Données transformées (optionnel)
 │   └── external/
 ├── notebooks/
 │   ├── 01_eda_fraude.ipynb
-│   └── 03_eda_segmentation.ipynb
+│   ├── 02_modelisation_fraude.ipynb
+│   ├── 03_eda_segmentation.ipynb
+│   └── 04_modelisation_segmentation.ipynb
 ├── src/
 │   ├── data/
 │   │   ├── load_data.py
@@ -270,11 +275,12 @@ Requête JSON
 
 | Métrique | Valeur (test) |
 |----------|---------------|
-| PR-AUC | **0,9910** |
+| PR-AUC | **0,9904** |
 | Recall | 0,9825 |
 | Precision | 1,0000 |
 | F1 | 0,9912 |
-| Seuil calibré | 0,84 |
+| Seuil calibré | 0,67 |
+| Lignes d'entraînement | ~734 000 |
 
 Comparaison complète : `models/fraud/fraud_model_comparison.csv`
 
@@ -370,7 +376,7 @@ curl -X POST "http://127.0.0.1:8000/predict/fraud" \
 {
   "prediction": 1,
   "probability": 0.92,
-  "threshold": 0.84,
+  "threshold": 0.67,
   "model": "xgboost"
 }
 ```
@@ -447,14 +453,26 @@ Ingestion → Validation → Preprocessing → Features → Entraînement
 - [x] API FastAPI avec chargement lazy des modèles
 - [x] Dashboard Streamlit de démonstration
 - [x] Tests automatisés (`pytest`)
+- [x] **Docker** + `docker-compose.yml` (API + dashboard)
+- [x] **CI GitHub Actions** (tests + health check ML)
+- [x] **Git LFS** pour `detection_fraude.csv` (voir `data/README.md`)
+- [x] **Monitoring MVP** (`scripts/check_ml_health.py`, `docs/MONITORING.md`)
+
+### Lancer avec Docker
+
+```bash
+docker compose up --build
+```
+
+| Service | URL locale |
+|---------|------------|
+| API | http://localhost:8000/docs |
+| Dashboard | http://localhost:8501 |
 
 ### Évolutions possibles
 
 - MLflow pour le tracking d'expériences
-- DVC pour le versioning des données
-- GitHub Actions (CI : tests + lint)
-- Docker / docker-compose
-- Monitoring de drift (Evidently AI)
+- Evidently AI pour le drift en production
 - Re-entraînement planifié
 
 ---
@@ -525,25 +543,15 @@ python scripts/generate_deliverables.py
 ### Limites actuelles
 
 - **Déséquilibre extrême** de la fraude : le seuil doit être ajusté selon la capacité opérationnelle de traitement des alertes.
-- **Split aléatoire** : une validation temporelle (`step`) serait plus réaliste en production.
+- **Split aléatoire** : une validation temporelle complémentaire sur `step` est désormais disponible (`fraud_temporal_metrics.json`).
 - **Données lourdes** : le dashboard charge des échantillons du CSV fraude pour certaines visualisations.
-- **Monitoring** : pas encore de suivi automatique de drift en production.
+- **Monitoring** : script `check_ml_health.py` + architecture cible dans `docs/MONITORING.md`
 
 ### Perspectives
 
 - Optimisation d'hyperparamètres (Optuna)
-- SHAP pour l'interprétabilité fraude
 - Segmentation RFM complémentaire
-- CI/CD avec GitHub Actions
-- Conteneurisation Docker
-
----
-
-## Références
-
-- Cahier des charges détaillé : [`OLD_README.md`](OLD_README.md)
-- Plan opérationnel : [`PLAN_README.md`](PLAN_README.md)
-- Sujet officiel : `projet_machine_learning_m2CDSD.pdf`
+- MLflow + Evidently AI (drift automatisé)
 
 ---
 

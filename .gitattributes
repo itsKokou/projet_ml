@@ -1,0 +1,2 @@
+# Donnees volumineuses — Git LFS
+data/raw/detection_fraude.csv filter=lfs diff=lfs merge=lfs -text

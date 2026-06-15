@@ -6,5 +6,7 @@
     "davies_bouldin": 2.423037268206795,
     "calinski_harabasz": 305.40549687371293,
     "n_clusters": 4
-  }
+  },
+  "dbscan_best_config": "dbscan_eps2.0_min10",
+  "dbscan_note": "DBSCAN exclu du modele de production : pas de predict() natif, bruit eleve et segments peu exploitables pour le marketing."
 }

@@ -1,0 +1,45 @@
+{
+  "assumptions": {
+    "cost_per_fp_review_eur": 25.0,
+    "fn_cost_model": "Somme des montants des transactions frauduleuses manquees (unites du dataset).",
+    "note": "Les montants sont en unites du dataset ; 1 unite = 1 EUR en lecture illustrative."
+  },
+  "selected_threshold": 0.67,
+  "test_frauds_total": 171,
+  "scenarios": [
+    {
+      "threshold": 0.5,
+      "false_negatives": 3,
+      "false_positives": 0,
+      "recall": 0.9824561403508771,
+      "precision": 1.0,
+      "fn_financial_loss_units": 2032438.0500000003,
+      "fp_operational_cost_eur": 0.0,
+      "total_cost_eur_equivalent": 2032438.0500000003,
+      "is_selected_threshold": false
+    },
+    {
+      "threshold": 0.67,
+      "false_negatives": 3,
+      "false_positives": 0,
+      "recall": 0.9824561403508771,
+      "precision": 1.0,
+      "fn_financial_loss_units": 2032438.0500000003,
+      "fp_operational_cost_eur": 0.0,
+      "total_cost_eur_equivalent": 2032438.0500000003,
+      "is_selected_threshold": true
+    },
+    {
+      "threshold": 0.84,
+      "false_negatives": 3,
+      "false_positives": 0,
+      "recall": 0.9824561403508771,
+      "precision": 1.0,
+      "fn_financial_loss_units": 2032438.0500000003,
+      "fp_operational_cost_eur": 0.0,
+      "total_cost_eur_equivalent": 2032438.0500000003,
+      "is_selected_threshold": false
+    }
+  ],
+  "recommendation": "Seuil 0.67 retenu : meilleur equilibre observe entre pertes FN et cout de revue FP pour la capacite operationnelle supposee."
+}

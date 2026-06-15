@@ -20,6 +20,7 @@ def test_model_info_endpoint():
     body = response.json()
     assert "fraud_model" in body
     assert "cluster_model" in body
+    assert body.get("fraud_threshold") == 0.67
 
 
 def test_predict_fraud_payload_valid():
