@@ -2424,7 +2424,7 @@ def show_technical_report() -> None:
                 file_name="presentation_finale.pptx",
                 mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                 width="stretch",
-                help="Slides pour la soutenance (12 diapositives).",
+                help="Slides pour la présentation",
             )
         else:
             st.caption("PPTX non disponible sur ce déploiement.")
